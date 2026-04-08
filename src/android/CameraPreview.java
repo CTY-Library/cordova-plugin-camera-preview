@@ -109,7 +109,7 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
 
     if (START_CAMERA_ACTION.equals(action)) {
       if (cordova.hasPermission(permissions[0])) {
-        return startCamera(args.getInt(0), args.getInt(1), args.getInt(2), args.getInt(3), args.getString(4), args.getBoolean(5), args.getBoolean(6), args.getBoolean(7), args.getString(8), args.getBoolean(9), args.getBoolean(10), args.getBoolean(11), callbackContext);
+        return startCamera(args.getInt(0), args.getInt(1), args.getInt(2), args.getInt(3), args.getString(4), args.getBoolean(5), args.getBoolean(6), args.getBoolean(7), args.getString(8), args.getBoolean(9), args.getBoolean(10), args.getBoolean(11), args.length() > 12 && args.getBoolean(12), callbackContext);
       } else {
         this.execCallback = callbackContext;
         this.execArgs = args;
@@ -208,7 +208,7 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
     }
 
     if(requestCode == CAM_REQ_CODE){
-      startCamera(this.execArgs.getInt(0), this.execArgs.getInt(1), this.execArgs.getInt(2), this.execArgs.getInt(3), this.execArgs.getString(4), this.execArgs.getBoolean(5), this.execArgs.getBoolean(6), this.execArgs.getBoolean(7), this.execArgs.getString(8), this.execArgs.getBoolean(9), this.execArgs.getBoolean(10), this.execArgs.getBoolean(11), this.execCallback);
+      startCamera(this.execArgs.getInt(0), this.execArgs.getInt(1), this.execArgs.getInt(2), this.execArgs.getInt(3), this.execArgs.getString(4), this.execArgs.getBoolean(5), this.execArgs.getBoolean(6), this.execArgs.getBoolean(7), this.execArgs.getString(8), this.execArgs.getBoolean(9), this.execArgs.getBoolean(10), this.execArgs.getBoolean(11), this.execArgs.length() > 12 && this.execArgs.getBoolean(12), this.execCallback);
     }else if(requestCode == VID_REQ_CODE){
       startRecordVideo(this.execArgs.getString(0), this.execArgs.getInt(1), this.execArgs.getInt(2), this.execArgs.getInt(3), this.execArgs.getBoolean(4),  this.execCallback);
     }
@@ -267,7 +267,7 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
     return true;
   }
 
-  private boolean startCamera(int x, int y, int width, int height, String defaultCamera, Boolean tapToTakePicture, Boolean dragEnabled, final Boolean toBack, String alpha, boolean tapFocus, boolean disableExifHeaderStripping, boolean storeToFile, CallbackContext callbackContext) {
+  private boolean startCamera(int x, int y, int width, int height, String defaultCamera, Boolean tapToTakePicture, Boolean dragEnabled, final Boolean toBack, String alpha, boolean tapFocus, boolean disableExifHeaderStripping, boolean storeToFile, boolean enableAutoSettings, CallbackContext callbackContext) {
     Log.d(TAG, "start camera action");
 
     if (fragment != null) {
@@ -285,6 +285,7 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
     fragment.tapToFocus = tapFocus;
     fragment.disableExifHeaderStripping = disableExifHeaderStripping;
     fragment.storeToFile = storeToFile;
+    fragment.enableAutoSettings = enableAutoSettings;
     fragment.toBack = toBack;
 
     DisplayMetrics metrics = cordova.getActivity().getResources().getDisplayMetrics();
@@ -868,11 +869,46 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
     Camera camera = fragment.getCamera();
     Camera.Parameters params = camera.getParameters();
 
-    params.setPreviewSize(width, height);
-    fragment.setCameraParameters(params);
-    camera.startPreview();
+    List<Camera.Size> supportedPreviewSizes = params.getSupportedPreviewSizes();
+    if (supportedPreviewSizes == null || supportedPreviewSizes.isEmpty()) {
+      callbackContext.error("No supported preview sizes");
+      return true;
+    }
 
-    callbackContext.success();
+    Camera.Size bestSize = null;
+    long bestScore = Long.MAX_VALUE;
+
+    for (Camera.Size size : supportedPreviewSizes) {
+      long directScore = Math.abs((long)size.width - width) + Math.abs((long)size.height - height);
+      long rotatedScore = Math.abs((long)size.width - height) + Math.abs((long)size.height - width);
+      long score = Math.min(directScore, rotatedScore);
+
+      if (score < bestScore) {
+        bestScore = score;
+        bestSize = size;
+      }
+    }
+
+    if (bestSize == null) {
+      callbackContext.error("No preview size matched");
+      return true;
+    }
+
+    try {
+      camera.stopPreview();
+      params.setPreviewSize(bestSize.width, bestSize.height);
+      fragment.setCameraParameters(params);
+      camera.startPreview();
+
+      JSONObject result = new JSONObject();
+      result.put("width", bestSize.width);
+      result.put("height", bestSize.height);
+      callbackContext.success(result);
+    } catch (Exception e) {
+      Log.e(TAG, "setPreviewSize failed", e);
+      callbackContext.error("setPreviewSize failed: " + e.getMessage());
+    }
+
     return true;
   }
 

@@ -2,7 +2,7 @@
 
 ## MASTER BRANCH (RECOMMENDED) - UNRELEASED
 - [View Diff](https://github.com/cordova-plugin-camera-preview/cordova-plugin-camera-preview/compare/v0.14.0...master)
-- [#713](https://github.com/cordova-plugin-camera-preview/cordova-plugin-camera-preview/pull/713) - Fix issue where on certain Android devices, the very first image captured was too dark / underexposed
+- Nothing yet
 
 ## v0.14.0 - LATEST RELEASED VERSION
 - [View Diff](https://github.com/cordova-plugin-camera-preview/cordova-plugin-camera-preview/compare/v0.13.0...v0.14.0)

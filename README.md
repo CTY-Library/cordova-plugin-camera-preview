@@ -94,6 +94,11 @@ All options stated are optional and will default to values here
 * `previewDrag` - Defaults to false - Does not work if toBack is set to false
 * `storeToFile` - Defaults to false - Capture images to a file and return back the file path instead of returning base64 encoded data.
 * `disableExifHeaderStripping` - Defaults to false - **Android Only** - Disable automatic rotation of the image, and let the browser deal with it (keep reading on how to achieve it)
+* `enableAutoSettings` - Defaults to false - When true, enables automatic camera settings during initialization (focus/exposure/white-balance and flash auto where supported)
+
+When the preview is displayed in front (`toBack: false`), Android also shows a native settings icon in the top-right corner. Tapping it opens an in-page native settings panel (no page jump), currently supporting capture ratio, grid style (thirds/rice grid) and capture timer (off/3s/5s).
+
+When the preview is displayed in front (`toBack: false`), iOS also shows a native settings icon in the top-right corner. Tapping it opens an in-page native settings panel (no page jump), currently supporting capture ratio, grid style (thirds/rice grid) and capture timer (off/3s/5s).
 
 ```javascript
 let options = {
@@ -107,7 +112,8 @@ let options = {
   tapFocus: false,
   previewDrag: false,
   storeToFile: false,
-  disableExifHeaderStripping: false
+  disableExifHeaderStripping: false,
+  enableAutoSettings: false
 };
 
 CameraPreview.startCamera(options);
