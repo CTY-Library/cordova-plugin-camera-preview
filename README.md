@@ -92,6 +92,7 @@ All options stated are optional and will default to values here
 * `tapPhoto` - Defaults to true - Does not work if toBack is set to false in which case you use the takePicture method
 * `tapFocus` - Defaults to false - Allows the user to tap to focus, when the view is in the foreground
 * `previewDrag` - Defaults to false - Does not work if toBack is set to false
+* `backgroundColor` - Defaults to '#000000' - Background color of the preview container (hex string, e.g. '#RRGGBB' or '#AARRGGBB', or 'transparent')
 * `storeToFile` - Defaults to false - Capture images to a file and return back the file path instead of returning base64 encoded data.
 * `disableExifHeaderStripping` - Defaults to false - **Android Only** - Disable automatic rotation of the image, and let the browser deal with it (keep reading on how to achieve it)
 * `enableAutoSettings` - Defaults to false - When true, enables automatic camera settings during initialization (focus/exposure/white-balance and flash auto where supported)
@@ -111,6 +112,7 @@ let options = {
   tapPhoto: true,
   tapFocus: false,
   previewDrag: false,
+  backgroundColor: '#000000',
   storeToFile: false,
   disableExifHeaderStripping: false,
   enableAutoSettings: false
@@ -420,6 +422,64 @@ CameraPreview.setExposureCompensation(3);
 
 ```javascript
 CameraPreview.setPreviewSize({width: window.screen.width, height: window.screen.height});
+```
+
+### setPreviewBackgroundColor(backgroundColor, [successCallback, errorCallback])
+
+<info>Change the preview background color at runtime. Accepts a hex string like `'#RRGGBB'`, `'#AARRGGBB'`, or the string `'transparent'`.</info><br/>
+
+```javascript
+// set background to magenta
+CameraPreview.setPreviewBackgroundColor('#FF00FF');
+```
+
+### setCaptureRatio(ratio, [successCallback, errorCallback])
+
+<info>Set the desired capture ratio used for choosing picture sizes and how the preview is cropped. Accepts one of: `'full'` (default / no constraint), `'4:3'`, `'16:9'`, `'1:1'`.</info><br/>
+
+```javascript
+// Use 4:3 capture ratio
+CameraPreview.setCaptureRatio('4:3', function(){
+  console.log('capture ratio set');
+});
+```
+
+### setStoreToFile(storeToFile, [successCallback, errorCallback])
+
+<info>When `true`, subsequent `takePicture` calls will store the captured image to a temporary file and return its file path. When `false`, `takePicture` returns a base64 JPEG string. This mirrors the `storeToFile` option available on `startCamera` but can be changed at runtime.</info><br/>
+
+```javascript
+// Switch to storing captured images to a file
+CameraPreview.setStoreToFile(true, function(){
+  console.log('storeToFile enabled');
+});
+```
+
+### setCaptureTimer(seconds, [successCallback, errorCallback])
+
+<info>Set a countdown delay (in seconds) applied before taking a picture. Use `0` to disable the timer. Common values: `0` (off), `3`, `5`.</info><br/>
+
+```javascript
+// Set a 3 second timer
+CameraPreview.setCaptureTimer(3, function(){
+  console.log('capture timer set');
+});
+```
+
+### setPreviewPosition(xOrObj, y, [successCallback, errorCallback])
+
+<info>Move the preview box after the camera has been started. Accepts either two numeric arguments `x, y` (CSS/DIP units) or a single object `{x: number, y: number}`. The preview will be repositioned without restarting the camera.</info><br/>
+
+```javascript
+// Move to x=10, y=20
+CameraPreview.setPreviewPosition(10, 20, function(){
+  console.log('preview moved');
+});
+
+// Or pass an object
+CameraPreview.setPreviewPosition({x: 10, y: 20}, function(){
+  console.log('preview moved');
+});
 ```
 
 ### getSupportedPictureSizes(cb, [errorCallback])

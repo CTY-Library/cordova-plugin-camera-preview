@@ -22,6 +22,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
 import android.widget.FrameLayout;
+import android.graphics.Color;
 
 import org.apache.cordova.CallbackContext;
 import org.apache.cordova.CordovaPlugin;
@@ -51,6 +52,11 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
   private static final String START_CAMERA_ACTION = "startCamera";
   private static final String STOP_CAMERA_ACTION = "stopCamera";
   private static final String PREVIEW_SIZE_ACTION = "setPreviewSize";
+  private static final String SET_PREVIEW_BACKGROUND_COLOR_ACTION = "setPreviewBackgroundColor";
+  private static final String SET_CAPTURE_RATIO_ACTION = "setCaptureRatio";
+  private static final String SET_CAPTURE_TIMER_ACTION = "setCaptureTimer";
+  private static final String SET_STORE_TO_FILE_ACTION = "setStoreToFile";
+  private static final String PREVIEW_POSITION_ACTION = "setPreviewPosition";
   private static final String SWITCH_CAMERA_ACTION = "switchCamera";
   private static final String TAKE_PICTURE_ACTION = "takePicture";
   private static final String START_RECORD_VIDEO_ACTION = "startRecordVideo";
@@ -109,7 +115,7 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
 
     if (START_CAMERA_ACTION.equals(action)) {
       if (cordova.hasPermission(permissions[0])) {
-        return startCamera(args.getInt(0), args.getInt(1), args.getInt(2), args.getInt(3), args.getString(4), args.getBoolean(5), args.getBoolean(6), args.getBoolean(7), args.getString(8), args.getBoolean(9), args.getBoolean(10), args.getBoolean(11), args.length() > 12 && args.getBoolean(12), callbackContext);
+        return startCamera(args.getInt(0), args.getInt(1), args.getInt(2), args.getInt(3), args.getString(4), args.getBoolean(5), args.getBoolean(6), args.getBoolean(7), args.getString(8), args.getString(9), args.getBoolean(10), args.getBoolean(11), args.getBoolean(12), args.length() > 13 && args.getBoolean(13), callbackContext);
       } else {
         this.execCallback = callbackContext;
         this.execArgs = args;
@@ -145,6 +151,16 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
       return getMaxZoom(callbackContext);
     } else if (PREVIEW_SIZE_ACTION.equals(action)) {
       return setPreviewSize(args.getInt(0), args.getInt(1), callbackContext);
+    } else if (SET_PREVIEW_BACKGROUND_COLOR_ACTION.equals(action)) {
+      return setPreviewBackgroundColor(args.getString(0), callbackContext);
+    } else if (SET_CAPTURE_RATIO_ACTION.equals(action)) {
+      return setCaptureRatio(args.getString(0), callbackContext);
+    } else if (SET_CAPTURE_TIMER_ACTION.equals(action)) {
+      return setCaptureTimer(args.getInt(0), callbackContext);
+    } else if (SET_STORE_TO_FILE_ACTION.equals(action)) {
+      return setStoreToFile(args.getBoolean(0), callbackContext);
+    } else if (PREVIEW_POSITION_ACTION.equals(action)) {
+      return setPreviewPosition(args.getInt(0), args.getInt(1), callbackContext);
     } else if (SUPPORTED_FLASH_MODES_ACTION.equals(action)) {
       return getSupportedFlashModes(callbackContext);
     } else if (GET_FLASH_MODE_ACTION.equals(action)) {
@@ -208,7 +224,7 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
     }
 
     if(requestCode == CAM_REQ_CODE){
-      startCamera(this.execArgs.getInt(0), this.execArgs.getInt(1), this.execArgs.getInt(2), this.execArgs.getInt(3), this.execArgs.getString(4), this.execArgs.getBoolean(5), this.execArgs.getBoolean(6), this.execArgs.getBoolean(7), this.execArgs.getString(8), this.execArgs.getBoolean(9), this.execArgs.getBoolean(10), this.execArgs.getBoolean(11), this.execArgs.length() > 12 && this.execArgs.getBoolean(12), this.execCallback);
+      startCamera(this.execArgs.getInt(0), this.execArgs.getInt(1), this.execArgs.getInt(2), this.execArgs.getInt(3), this.execArgs.getString(4), this.execArgs.getBoolean(5), this.execArgs.getBoolean(6), this.execArgs.getBoolean(7), this.execArgs.getString(8), this.execArgs.getString(9), this.execArgs.getBoolean(10), this.execArgs.getBoolean(11), this.execArgs.getBoolean(12), this.execArgs.length() > 13 && this.execArgs.getBoolean(13), this.execCallback);
     }else if(requestCode == VID_REQ_CODE){
       startRecordVideo(this.execArgs.getString(0), this.execArgs.getInt(1), this.execArgs.getInt(2), this.execArgs.getInt(3), this.execArgs.getBoolean(4),  this.execCallback);
     }
@@ -220,6 +236,91 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
       return false;
     }
 
+    return true;
+  }
+
+  private boolean setCaptureRatio(String ratio, CallbackContext callbackContext) {
+    if(this.hasView(callbackContext) == false){
+      return true;
+    }
+
+    cordova.getActivity().runOnUiThread(new Runnable() {
+      @Override
+      public void run() {
+        try {
+          fragment.setDesiredPictureRatio(ratio);
+        } catch (Exception e) {
+          Log.e(TAG, "setCaptureRatio failed", e);
+        }
+      }
+    });
+
+    callbackContext.success();
+    return true;
+  }
+
+  private boolean setCaptureTimer(int seconds, CallbackContext callbackContext) {
+    if(this.hasView(callbackContext) == false){
+      return true;
+    }
+
+    cordova.getActivity().runOnUiThread(new Runnable() {
+      @Override
+      public void run() {
+        try {
+          fragment.setCaptureDelaySeconds(seconds);
+        } catch (Exception e) {
+          Log.e(TAG, "setCaptureTimer failed", e);
+        }
+      }
+    });
+
+    callbackContext.success(seconds);
+    return true;
+  }
+
+  private boolean setStoreToFile(boolean storeToFile, CallbackContext callbackContext) {
+    if(this.hasView(callbackContext) == false){
+      return true;
+    }
+
+    cordova.getActivity().runOnUiThread(new Runnable() {
+      @Override
+      public void run() {
+        try {
+          fragment.storeToFile = storeToFile;
+        } catch (Exception e) {
+          Log.e(TAG, "setStoreToFile failed", e);
+        }
+      }
+    });
+
+    callbackContext.success();
+    return true;
+  }
+
+  private boolean setPreviewPosition(int x, int y, CallbackContext callbackContext) {
+    if (fragment == null) {
+      callbackContext.error("No preview");
+      return true;
+    }
+
+    final DisplayMetrics metrics = cordova.getActivity().getResources().getDisplayMetrics();
+    final int computedX = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, x, metrics);
+    final int computedY = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, y, metrics);
+
+    cordova.getActivity().runOnUiThread(new Runnable() {
+      @Override
+      public void run() {
+        try {
+          fragment.updatePreviewPosition(computedX, computedY);
+        } catch (Exception e) {
+          Log.e(TAG, "setPreviewPosition failed", e);
+        }
+      }
+    });
+
+    callbackContext.success();
     return true;
   }
 
@@ -267,7 +368,7 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
     return true;
   }
 
-  private boolean startCamera(int x, int y, int width, int height, String defaultCamera, Boolean tapToTakePicture, Boolean dragEnabled, final Boolean toBack, String alpha, boolean tapFocus, boolean disableExifHeaderStripping, boolean storeToFile, boolean enableAutoSettings, CallbackContext callbackContext) {
+  private boolean startCamera(int x, int y, int width, int height, String defaultCamera, Boolean tapToTakePicture, Boolean dragEnabled, final Boolean toBack, String alpha, final String backgroundColor, boolean tapFocus, boolean disableExifHeaderStripping, boolean storeToFile, boolean enableAutoSettings, CallbackContext callbackContext) {
     Log.d(TAG, "start camera action");
 
     if (fragment != null) {
@@ -314,6 +415,15 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
 
           FrameLayout.LayoutParams containerLayoutParams = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT);
           cordova.getActivity().addContentView(containerView, containerLayoutParams);
+        }
+
+        // apply background color to container view (accepts hex strings like #RRGGBB or color names)
+        try {
+          int parsedColor = Color.parseColor(backgroundColor != null ? backgroundColor : "#000000");
+          containerView.setBackgroundColor(parsedColor);
+        } catch (Exception e) {
+          Log.w(TAG, "Invalid backgroundColor provided, defaulting to black: " + backgroundColor);
+          containerView.setBackgroundColor(0xFF000000);
         }
 
         //display camera below the webview
@@ -909,6 +1019,32 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
       callbackContext.error("setPreviewSize failed: " + e.getMessage());
     }
 
+    return true;
+  }
+
+  private boolean setPreviewBackgroundColor(final String backgroundColor, CallbackContext callbackContext) {
+    cordova.getActivity().runOnUiThread(new Runnable() {
+      @Override
+      public void run() {
+        try {
+          FrameLayout containerView = (FrameLayout)cordova.getActivity().findViewById(containerViewId);
+          if (containerView == null) {
+            containerView = new FrameLayout(cordova.getActivity().getApplicationContext());
+            containerView.setId(containerViewId);
+            FrameLayout.LayoutParams containerLayoutParams = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT);
+            cordova.getActivity().addContentView(containerView, containerLayoutParams);
+          }
+
+          int parsedColor = Color.parseColor(backgroundColor != null ? backgroundColor : "#000000");
+          containerView.setBackgroundColor(parsedColor);
+
+          callbackContext.success();
+        } catch (Exception e) {
+          Log.e(TAG, "setPreviewBackgroundColor failed", e);
+          callbackContext.error("setPreviewBackgroundColor failed: " + e.getMessage());
+        }
+      }
+    });
     return true;
   }
 

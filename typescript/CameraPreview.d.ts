@@ -11,6 +11,7 @@ declare module 'cordova-plugin-camera-preview' {
 
   interface CameraPreviewStartCameraOptions {
     alpha?: number;
+    backgroundColor?: string;
     camera?: CameraPreviewCameraDirection|string;
     height?: number;
     previewDrag?: boolean;
@@ -57,6 +58,11 @@ declare module 'cordova-plugin-camera-preview' {
     getZoom(onSuccess?: CameraPreviewSuccessHandler, onError?: CameraPreviewErrorHandler): void;
     getHorizontalFOV(onSuccess?: CameraPreviewSuccessHandler, onError?: CameraPreviewErrorHandler): void;
     setPreviewSize(dimensions?: CameraPreviewPreviewSizeDimension|string, onSuccess?: CameraPreviewSuccessHandler, onError?: CameraPreviewErrorHandler): void;
+    setPreviewBackgroundColor(backgroundColor?: string, onSuccess?: CameraPreviewSuccessHandler, onError?: CameraPreviewErrorHandler): void;
+    setCaptureRatio(ratio?: string, onSuccess?: CameraPreviewSuccessHandler, onError?: CameraPreviewErrorHandler): void;
+    setStoreToFile(storeToFile?: boolean, onSuccess?: CameraPreviewSuccessHandler, onError?: CameraPreviewErrorHandler): void;
+    setCaptureTimer(seconds?: number, onSuccess?: CameraPreviewSuccessHandler, onError?: CameraPreviewErrorHandler): void;
+    setPreviewPosition(x?: number|{x:number,y:number}, y?: number, onSuccess?: CameraPreviewSuccessHandler, onError?: CameraPreviewErrorHandler): void;
     getSupportedPictureSizes(onSuccess?: CameraPreviewSuccessHandler, onError?: CameraPreviewErrorHandler): void;
     getSupportedFlashModes(onSuccess?: CameraPreviewSuccessHandler, onError?: CameraPreviewErrorHandler): void;
     getSupportedColorEffects(onSuccess?: CameraPreviewSuccessHandler, onError?: CameraPreviewErrorHandler): void;

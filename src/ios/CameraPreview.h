@@ -26,6 +26,12 @@
 - (void) setExposureCompensation:(CDVInvokedUrlCommand*)command;
 - (void) getExposureCompensationRange:(CDVInvokedUrlCommand*)command;
 - (void) setPreviewSize: (CDVInvokedUrlCommand*)command;
+- (void) setPreviewSize: (CDVInvokedUrlCommand*)command;
+- (void) setPreviewBackgroundColor:(CDVInvokedUrlCommand*)command;
+- (void) setCaptureRatio:(CDVInvokedUrlCommand*)command;
+- (void) setCaptureTimer:(CDVInvokedUrlCommand*)command;
+- (void) setStoreToFile:(CDVInvokedUrlCommand*)command;
+- (void) setPreviewPosition:(CDVInvokedUrlCommand*)command;
 - (void) switchCamera:(CDVInvokedUrlCommand*)command;
 - (void) takePicture:(CDVInvokedUrlCommand*)command;
 - (void) takeSnapshot:(CDVInvokedUrlCommand*)command;

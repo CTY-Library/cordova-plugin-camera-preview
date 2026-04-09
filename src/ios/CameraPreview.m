@@ -12,8 +12,6 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
   CPCameraGridStyleRice = 2
 };
 
-typedef void (^CPCameraSelectionApplyBlock)(NSInteger selectedIndex);
-
 @interface CPCameraGridOverlayView : UIView
 @property (nonatomic, assign) CPCameraGridStyle gridStyle;
 @end
@@ -77,9 +75,7 @@ typedef void (^CPCameraSelectionApplyBlock)(NSInteger selectedIndex);
 @property (nonatomic, assign) NSTimeInterval captureTimerSeconds;
 @property (nonatomic, strong) UIView *settingsDimView;
 @property (nonatomic, strong) UIView *settingsCardView;
-@property (nonatomic, copy) CPCameraSelectionApplyBlock selectionApplyBlock;
-@property (nonatomic, strong) NSArray<UIButton *> *selectionOptionButtons;
-@property (nonatomic, assign) NSInteger selectionSelectedIndex;
+@property (nonatomic, strong) UIView *previewBackgroundView;
 
 @end
 
@@ -111,10 +107,11 @@ typedef void (^CPCameraSelectionApplyBlock)(NSInteger selectedIndex);
     BOOL dragEnabled = (BOOL)[command.arguments[6] boolValue];
     BOOL toBack = (BOOL)[command.arguments[7] boolValue];
     CGFloat alpha = (CGFloat)[command.arguments[8] floatValue];
-    BOOL tapToFocus = (BOOL) [command.arguments[9] boolValue];
-    BOOL disableExifHeaderStripping = (BOOL) [command.arguments[10] boolValue]; // ignore Android only
-    self.storeToFile = (BOOL) [command.arguments[11] boolValue];
-    BOOL enableAutoSettings = command.arguments.count > 12 ? (BOOL) [command.arguments[12] boolValue] : NO;
+    NSString *backgroundColor = command.arguments.count > 9 ? command.arguments[9] : nil;
+    BOOL tapToFocus = (BOOL) [command.arguments[10] boolValue];
+    BOOL disableExifHeaderStripping = (BOOL) [command.arguments[11] boolValue]; // ignore Android only
+    self.storeToFile = (BOOL) [command.arguments[12] boolValue];
+    BOOL enableAutoSettings = command.arguments.count > 13 ? (BOOL) [command.arguments[13] boolValue] : NO;
 
     // Create the session manager
     self.sessionManager = [[CameraSessionManager alloc] init];
@@ -131,7 +128,41 @@ typedef void (^CPCameraSelectionApplyBlock)(NSInteger selectedIndex);
     self.captureTimerSeconds = 0.0;
     self.cameraRenderController.delegate = self;
 
+    // apply background color to camera view. Accepts hex strings like #RRGGBB or #AARRGGBB or the string "transparent"
+    UIColor *bgColorUIColor = [UIColor blackColor];
+    if ([backgroundColor isKindOfClass:[NSString class]] && ((NSString*)backgroundColor).length > 0) {
+      NSString *bg = (NSString*)backgroundColor;
+      if ([[bg lowercaseString] isEqualToString:@"transparent"]) {
+        bgColorUIColor = [UIColor clearColor];
+      } else {
+        NSString *c = bg;
+        if ([c hasPrefix:@"#"]) {
+          c = [c substringFromIndex:1];
+        }
+        unsigned int hex = 0;
+        NSScanner *scanner = [NSScanner scannerWithString:c];
+        [scanner scanHexInt:&hex];
+        if (c.length == 6) {
+          bgColorUIColor = [self colorWithHex:hex alpha:1.0];
+        } else if (c.length == 8) {
+          CGFloat a = ((hex >> 24) & 0xFF) / 255.0;
+          NSInteger rgb = hex & 0xFFFFFF;
+          bgColorUIColor = [self colorWithHex:rgb alpha:a];
+        } else {
+          bgColorUIColor = [self colorWithHex:hex alpha:1.0];
+        }
+      }
+    }
+    self.cameraRenderController.view.backgroundColor = bgColorUIColor;
+
     [self.viewController addChildViewController:self.cameraRenderController];
+
+    // ensure we have a full-screen background view to show color behind/around the preview
+    if (!self.previewBackgroundView) {
+      self.previewBackgroundView = [[UIView alloc] initWithFrame:self.viewController.view.bounds];
+      self.previewBackgroundView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    }
+    self.previewBackgroundView.backgroundColor = bgColorUIColor;
 
     if (toBack) {
       // display the camera below the webview
@@ -143,11 +174,18 @@ typedef void (^CPCameraSelectionApplyBlock)(NSInteger selectedIndex);
       self.webView.scrollView.opaque = NO;
       self.webView.scrollView.backgroundColor = [UIColor clearColor];
 
-      [self.viewController.view insertSubview:self.cameraRenderController.view atIndex:0];
+      if (![self.previewBackgroundView isDescendantOfView:self.viewController.view]) {
+        [self.viewController.view insertSubview:self.previewBackgroundView atIndex:0];
+      }
+      [self.previewBackgroundView addSubview:self.cameraRenderController.view];
       [self.webView.superview bringSubviewToFront:self.webView];
     } else {
+      // camera in front
+      if (![self.previewBackgroundView isDescendantOfView:self.viewController.view]) {
+        [self.viewController.view insertSubview:self.previewBackgroundView aboveSubview:self.webView];
+      }
       self.cameraRenderController.view.alpha = alpha;
-      [self.webView.superview insertSubview:self.cameraRenderController.view aboveSubview:self.webView];
+      [self.viewController.view insertSubview:self.cameraRenderController.view aboveSubview:self.previewBackgroundView];
     }
 
     [self setupIOSSettingsButtonIfNeeded:toBack];
@@ -225,24 +263,25 @@ typedef void (^CPCameraSelectionApplyBlock)(NSInteger selectedIndex);
 
 - (void)presentInPageCameraSettingsPanel {
   __weak typeof(self) weakSelf = self;
-  [self presentCardPanelWithTitle:@"相机设置" subtitle:@"在当前页面调整参数，立即生效" bodyBuilder:^(UIStackView *stackView) {
+  [self presentCardPanelWithTitle:@"相机设置" subtitle:@"全部选项集中展示，点击即生效" bodyBuilder:^(UIStackView *stackView) {
     __strong typeof(weakSelf) strongSelf = weakSelf;
     if (strongSelf == nil) {
       return;
     }
 
-    [stackView addArrangedSubview:[strongSelf createNavRowWithIcon:@"比"
-                                                            title:@"拍照比例"
-                                                            value:[strongSelf captureRatioLabel]
-                                                           action:@selector(onRatioRowTapped)]];
-    [stackView addArrangedSubview:[strongSelf createNavRowWithIcon:@"网"
-                                                            title:@"参考线"
-                                                            value:[strongSelf gridStyleLabel]
-                                                           action:@selector(onGridRowTapped)]];
-    [stackView addArrangedSubview:[strongSelf createNavRowWithIcon:@"时"
-                                                            title:@"计时拍照"
-                                                            value:[strongSelf captureTimerLabel]
-                                                           action:@selector(onTimerRowTapped)]];
+    [stackView addArrangedSubview:[strongSelf createInlineSegmentGroupWithTitle:@"拍照比例"
+                                                                           items:@[@"全屏", @"4:3", @"16:9", @"1:1"]
+                                                                   selectedIndex:[strongSelf currentRatioSegmentIndex]
+                                                                          action:@selector(onRatioSegmentChanged:)]];
+    [stackView addArrangedSubview:[strongSelf createInlineSegmentGroupWithTitle:@"网格样式"
+                                                                           items:@[@"关闭", @"九宫格", @"米字格"]
+                                                                   selectedIndex:self.gridOverlayView.gridStyle
+                                                                          action:@selector(onGridSegmentChanged:)]];
+    [stackView addArrangedSubview:[strongSelf createInlineSegmentGroupWithTitle:@"计时拍照"
+                                                                           items:@[@"关闭", @"3秒", @"5秒"]
+                                                                   selectedIndex:[strongSelf currentTimerSegmentIndex]
+                                                                          action:@selector(onTimerSegmentChanged:)]];
+
     if ([strongSelf isTiltShiftSupported]) {
       [stackView addArrangedSubview:[strongSelf createNavRowWithIcon:@"移"
                                                               title:@"移轴"
@@ -258,99 +297,54 @@ typedef void (^CPCameraSelectionApplyBlock)(NSInteger selectedIndex);
   }];
 }
 
-- (void)presentRatioSelectionSheet {
-  NSArray<NSString *> *options = @[@"全屏", @"1:1", @"4:3", @"16:9"];
-  NSInteger currentIndex = 0;
-  if (self.desiredCaptureRatio == 1.0) {
-    currentIndex = 1;
-  } else if (fabs(self.desiredCaptureRatio - (4.0/3.0)) < 0.01) {
-    currentIndex = 2;
-  } else if (fabs(self.desiredCaptureRatio - (16.0/9.0)) < 0.01) {
-    currentIndex = 3;
+- (NSInteger)currentRatioSegmentIndex {
+  if (fabs(self.desiredCaptureRatio - (4.0 / 3.0)) < 0.01) {
+    return 1;
   }
-
-  __weak typeof(self) weakSelf = self;
-  [self presentSelectionPanelWithTitle:@"拍照比例"
-                              subtitle:@"选择预览画面比例"
-                               options:options
-                          currentIndex:currentIndex
-                             onConfirm:^(NSInteger selectedIndex) {
-    __strong typeof(weakSelf) strongSelf = weakSelf;
-    if (strongSelf == nil) {
-      return;
-    }
-    if (selectedIndex == 1) {
-      [strongSelf applyCaptureRatio:1.0];
-    } else if (selectedIndex == 2) {
-      [strongSelf applyCaptureRatio:(4.0/3.0)];
-    } else if (selectedIndex == 3) {
-      [strongSelf applyCaptureRatio:(16.0/9.0)];
-    } else {
-      [strongSelf applyCaptureRatio:0.0];
-    }
-  }];
+  if (fabs(self.desiredCaptureRatio - (16.0 / 9.0)) < 0.01) {
+    return 2;
+  }
+  if (fabs(self.desiredCaptureRatio - 1.0) < 0.01) {
+    return 3;
+  }
+  return 0;
 }
 
-- (void)presentGridSelectionSheet {
-  NSArray<NSString *> *options = @[@"关闭", @"九宫格", @"米字格"];
-  NSInteger currentIndex = self.gridOverlayView.gridStyle;
-  if (currentIndex < 0 || currentIndex >= (NSInteger)options.count) {
-    currentIndex = 0;
-  }
-
-  __weak typeof(self) weakSelf = self;
-  [self presentSelectionPanelWithTitle:@"参考线"
-                              subtitle:@"构图参考线设置"
-                               options:options
-                          currentIndex:currentIndex
-                             onConfirm:^(NSInteger selectedIndex) {
-    __strong typeof(weakSelf) strongSelf = weakSelf;
-    if (strongSelf == nil) {
-      return;
-    }
-    [strongSelf applyGridStyle:(CPCameraGridStyle)selectedIndex];
-  }];
-}
-
-- (void)presentTimerSelectionSheet {
-  NSArray<NSString *> *options = @[@"关闭", @"3 秒", @"5 秒"];
-  NSInteger currentIndex = 0;
+- (NSInteger)currentTimerSegmentIndex {
   if (self.captureTimerSeconds >= 5.0) {
-    currentIndex = 2;
-  } else if (self.captureTimerSeconds >= 3.0) {
-    currentIndex = 1;
+    return 2;
   }
-
-  __weak typeof(self) weakSelf = self;
-  [self presentSelectionPanelWithTitle:@"计时拍照"
-                              subtitle:@"拍照前延时触发"
-                               options:options
-                          currentIndex:currentIndex
-                             onConfirm:^(NSInteger selectedIndex) {
-    __strong typeof(weakSelf) strongSelf = weakSelf;
-    if (strongSelf == nil) {
-      return;
-    }
-    if (selectedIndex == 1) {
-      [strongSelf applyCaptureTimer:3.0];
-    } else if (selectedIndex == 2) {
-      [strongSelf applyCaptureTimer:5.0];
-    } else {
-      [strongSelf applyCaptureTimer:0.0];
-    }
-  }];
+  if (self.captureTimerSeconds >= 3.0) {
+    return 1;
+  }
+  return 0;
 }
 
-- (void)onRatioRowTapped {
-  [self presentRatioSelectionSheet];
+- (void)onRatioSegmentChanged:(UISegmentedControl *)sender {
+  if (sender.selectedSegmentIndex == 1) {
+    [self applyCaptureRatio:(4.0 / 3.0)];
+  } else if (sender.selectedSegmentIndex == 2) {
+    [self applyCaptureRatio:(16.0 / 9.0)];
+  } else if (sender.selectedSegmentIndex == 3) {
+    [self applyCaptureRatio:1.0];
+  } else {
+    [self applyCaptureRatio:0.0];
+  }
 }
 
-- (void)onGridRowTapped {
-  [self presentGridSelectionSheet];
+- (void)onGridSegmentChanged:(UISegmentedControl *)sender {
+  NSInteger index = MAX(0, MIN(sender.selectedSegmentIndex, 2));
+  [self applyGridStyle:(CPCameraGridStyle)index];
 }
 
-- (void)onTimerRowTapped {
-  [self presentTimerSelectionSheet];
+- (void)onTimerSegmentChanged:(UISegmentedControl *)sender {
+  if (sender.selectedSegmentIndex == 1) {
+    [self applyCaptureTimer:3.0];
+  } else if (sender.selectedSegmentIndex == 2) {
+    [self applyCaptureTimer:5.0];
+  } else {
+    [self applyCaptureTimer:0.0];
+  }
 }
 
 - (void)onTiltShiftRowTapped {
@@ -414,9 +408,6 @@ typedef void (^CPCameraSelectionApplyBlock)(NSInteger selectedIndex);
   UIView *cardView = self.settingsCardView;
   self.settingsDimView = nil;
   self.settingsCardView = nil;
-  self.selectionApplyBlock = nil;
-  self.selectionOptionButtons = nil;
-  self.selectionSelectedIndex = 0;
 
   [UIView animateWithDuration:0.18 animations:^{
     dimView.alpha = 0.0;
@@ -445,18 +436,18 @@ typedef void (^CPCameraSelectionApplyBlock)(NSInteger selectedIndex);
   UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(dismissSettingsPanel)];
   [dimView addGestureRecognizer:tap];
 
-  CGFloat panelWidth = MIN(CGRectGetWidth(host.bounds) - 24.0, 360.0);
+  CGFloat panelWidth = MIN(CGRectGetWidth(host.bounds) - 20.0, 360.0);
   if (panelWidth < 280.0) {
-    panelWidth = MAX(240.0, CGRectGetWidth(host.bounds) - 16.0);
+    panelWidth = MAX(240.0, CGRectGetWidth(host.bounds) - 12.0);
   }
 
   UIView *panel = [[UIView alloc] initWithFrame:CGRectMake((CGRectGetWidth(host.bounds) - panelWidth) / 2.0,
-                                                           (CGRectGetHeight(host.bounds) - 340.0) / 2.0,
+                                                           (CGRectGetHeight(host.bounds) - 320.0) / 2.0,
                                                            panelWidth,
-                                                           340.0)];
+                                                           320.0)];
   panel.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin | UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin;
   panel.backgroundColor = [self colorWithHex:0xFAFAFA alpha:1.0];
-  panel.layer.cornerRadius = 16.0;
+  panel.layer.cornerRadius = 14.0;
   panel.layer.masksToBounds = YES;
   panel.alpha = 0.0;
   panel.transform = CGAffineTransformMakeScale(0.96, 0.96);
@@ -464,20 +455,20 @@ typedef void (^CPCameraSelectionApplyBlock)(NSInteger selectedIndex);
   UIStackView *stack = [[UIStackView alloc] initWithFrame:panel.bounds];
   stack.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
   stack.axis = UILayoutConstraintAxisVertical;
-  stack.spacing = 8.0;
-  stack.layoutMargins = UIEdgeInsetsMake(16.0, 16.0, 16.0, 16.0);
+  stack.spacing = 6.0;
+  stack.layoutMargins = UIEdgeInsetsMake(12.0, 12.0, 12.0, 12.0);
   stack.layoutMarginsRelativeArrangement = YES;
 
   UILabel *titleLabel = [[UILabel alloc] init];
   titleLabel.text = title;
   titleLabel.textColor = [self colorWithHex:0x1F2937 alpha:1.0];
-  titleLabel.font = [UIFont boldSystemFontOfSize:18.0];
+  titleLabel.font = [UIFont boldSystemFontOfSize:17.0];
   [stack addArrangedSubview:titleLabel];
 
   UILabel *subtitleLabel = [[UILabel alloc] init];
   subtitleLabel.text = subtitle;
   subtitleLabel.textColor = [self colorWithHex:0x6B7280 alpha:1.0];
-  subtitleLabel.font = [UIFont systemFontOfSize:13.0];
+  subtitleLabel.font = [UIFont systemFontOfSize:12.0];
   [stack addArrangedSubview:subtitleLabel];
 
   if (builder != nil) {
@@ -566,137 +557,44 @@ typedef void (^CPCameraSelectionApplyBlock)(NSInteger selectedIndex);
   [button setTitleColor:[self colorWithHex:textHex alpha:1.0] forState:UIControlStateNormal];
   button.titleLabel.font = [UIFont systemFontOfSize:14.0 weight:UIFontWeightSemibold];
   button.backgroundColor = [self colorWithHex:backgroundHex alpha:1.0];
-  button.layer.cornerRadius = 10.0;
-  [button.heightAnchor constraintEqualToConstant:40.0].active = YES;
+  button.layer.cornerRadius = 9.0;
+  [button.heightAnchor constraintEqualToConstant:36.0].active = YES;
   return button;
 }
 
-- (UIButton *)createSelectableRowWithTitle:(NSString *)title selected:(BOOL)selected {
-  UIButton *row = [UIButton buttonWithType:UIButtonTypeCustom];
-  row.layer.cornerRadius = 10.0;
-  row.contentEdgeInsets = UIEdgeInsetsMake(10.0, 12.0, 10.0, 12.0);
-  [row.heightAnchor constraintEqualToConstant:44.0].active = YES;
+- (UIView *)createInlineSegmentGroupWithTitle:(NSString *)title
+                                         items:(NSArray<NSString *> *)items
+                                 selectedIndex:(NSInteger)selectedIndex
+                                        action:(SEL)action {
+  UIStackView *group = [[UIStackView alloc] init];
+  group.axis = UILayoutConstraintAxisVertical;
+  group.spacing = 4.0;
 
-  UILabel *label = [[UILabel alloc] init];
-  label.text = title;
-  label.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightMedium];
-  label.tag = 2001;
+  UILabel *titleLabel = [[UILabel alloc] init];
+  titleLabel.text = title;
+  titleLabel.textColor = [self colorWithHex:0x4B5563 alpha:1.0];
+  titleLabel.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightMedium];
+  [group addArrangedSubview:titleLabel];
 
-  UILabel *check = [[UILabel alloc] init];
-  check.font = [UIFont systemFontOfSize:12.0 weight:UIFontWeightSemibold];
-  check.text = @"已选";
-  check.tag = 2002;
+  UISegmentedControl *segment = [[UISegmentedControl alloc] initWithItems:items];
+  segment.selectedSegmentIndex = MAX(0, MIN(selectedIndex, (NSInteger)items.count - 1));
+  segment.backgroundColor = [UIColor whiteColor];
+  segment.selectedSegmentTintColor = [self colorWithHex:0xEAF2FF alpha:1.0];
+  NSDictionary *normalAttrs = @{
+    NSForegroundColorAttributeName: [self colorWithHex:0x374151 alpha:1.0],
+    NSFontAttributeName: [UIFont systemFontOfSize:12.0 weight:UIFontWeightMedium]
+  };
+  NSDictionary *selectedAttrs = @{
+    NSForegroundColorAttributeName: [self colorWithHex:0x1D4ED8 alpha:1.0],
+    NSFontAttributeName: [UIFont systemFontOfSize:12.0 weight:UIFontWeightSemibold]
+  };
+  [segment setTitleTextAttributes:normalAttrs forState:UIControlStateNormal];
+  [segment setTitleTextAttributes:selectedAttrs forState:UIControlStateSelected];
+  [segment addTarget:self action:action forControlEvents:UIControlEventValueChanged];
+  [segment.heightAnchor constraintEqualToConstant:32.0].active = YES;
+  [group addArrangedSubview:segment];
 
-  UIStackView *content = [[UIStackView alloc] initWithArrangedSubviews:@[label, check]];
-  content.axis = UILayoutConstraintAxisHorizontal;
-  content.alignment = UIStackViewAlignmentCenter;
-  content.distribution = UIStackViewDistributionFill;
-  content.userInteractionEnabled = NO;
-  [check setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
-
-  content.translatesAutoresizingMaskIntoConstraints = NO;
-  [row addSubview:content];
-  [NSLayoutConstraint activateConstraints:@[
-    [content.leadingAnchor constraintEqualToAnchor:row.leadingAnchor],
-    [content.trailingAnchor constraintEqualToAnchor:row.trailingAnchor],
-    [content.topAnchor constraintEqualToAnchor:row.topAnchor],
-    [content.bottomAnchor constraintEqualToAnchor:row.bottomAnchor]
-  ]];
-
-  [self updateSelectableRow:row selected:selected];
-  return row;
-}
-
-- (void)updateSelectableRow:(UIButton *)row selected:(BOOL)selected {
-  UILabel *label = [row viewWithTag:2001];
-  UILabel *check = [row viewWithTag:2002];
-  if (selected) {
-    row.backgroundColor = [self colorWithHex:0xEAF2FF alpha:1.0];
-    row.layer.borderColor = [self colorWithHex:0x3B82F6 alpha:1.0].CGColor;
-    row.layer.borderWidth = 1.0;
-    label.textColor = [self colorWithHex:0x1D4ED8 alpha:1.0];
-    check.textColor = [self colorWithHex:0x1D4ED8 alpha:1.0];
-    check.hidden = NO;
-  } else {
-    row.backgroundColor = [UIColor whiteColor];
-    row.layer.borderWidth = 0.0;
-    label.textColor = [self colorWithHex:0x111827 alpha:1.0];
-    check.hidden = YES;
-  }
-}
-
-- (void)presentSelectionPanelWithTitle:(NSString *)title
-                              subtitle:(NSString *)subtitle
-                               options:(NSArray<NSString *> *)options
-                          currentIndex:(NSInteger)currentIndex
-                             onConfirm:(CPCameraSelectionApplyBlock)onConfirm {
-  __block NSInteger selectedIndex = MAX(0, MIN(currentIndex, (NSInteger)options.count - 1));
-  self.selectionApplyBlock = onConfirm;
-  self.selectionSelectedIndex = selectedIndex;
-
-  __weak typeof(self) weakSelf = self;
-  [self presentCardPanelWithTitle:title subtitle:subtitle bodyBuilder:^(UIStackView *stackView) {
-    __strong typeof(weakSelf) strongSelf = weakSelf;
-    if (strongSelf == nil) {
-      return;
-    }
-
-    NSMutableArray<UIButton *> *optionButtons = [NSMutableArray array];
-    for (NSInteger idx = 0; idx < (NSInteger)options.count; idx++) {
-      UIButton *row = [strongSelf createSelectableRowWithTitle:options[idx] selected:(idx == selectedIndex)];
-      row.tag = (NSInteger)(3000 + idx);
-      [row addTarget:strongSelf action:@selector(onSelectionRowTapped:) forControlEvents:UIControlEventTouchUpInside];
-      [optionButtons addObject:row];
-      [stackView addArrangedSubview:row];
-    }
-
-    strongSelf.selectionOptionButtons = optionButtons;
-
-    UIStackView *actions = [[UIStackView alloc] init];
-    actions.axis = UILayoutConstraintAxisHorizontal;
-    actions.spacing = 8.0;
-    actions.distribution = UIStackViewDistributionFillEqually;
-
-    UIButton *cancel = [strongSelf createPanelActionButtonWithTitle:@"取消" backgroundHex:0xE5E7EB textHex:0x374151];
-    [cancel addTarget:strongSelf action:@selector(onSelectionCancelTapped) forControlEvents:UIControlEventTouchUpInside];
-    [actions addArrangedSubview:cancel];
-
-    UIButton *confirm = [strongSelf createPanelActionButtonWithTitle:@"确定" backgroundHex:0x111827 textHex:0xFFFFFF];
-    [confirm addTarget:strongSelf action:@selector(onSelectionConfirmTapped) forControlEvents:UIControlEventTouchUpInside];
-    [actions addArrangedSubview:confirm];
-
-    [stackView addArrangedSubview:actions];
-  }];
-}
-
-- (void)onSelectionRowTapped:(UIButton *)sender {
-  NSInteger selectedIndex = sender.tag - 3000;
-  if (selectedIndex < 0) {
-    return;
-  }
-
-  NSArray<UIButton *> *buttons = self.selectionOptionButtons;
-  if (buttons == nil) {
-    return;
-  }
-
-  for (NSInteger idx = 0; idx < (NSInteger)buttons.count; idx++) {
-    [self updateSelectableRow:buttons[idx] selected:(idx == selectedIndex)];
-  }
-  self.selectionSelectedIndex = selectedIndex;
-}
-
-- (void)onSelectionCancelTapped {
-  [self dismissSettingsPanel];
-}
-
-- (void)onSelectionConfirmTapped {
-  NSInteger selectedIndex = self.selectionSelectedIndex;
-  CPCameraSelectionApplyBlock applyBlock = self.selectionApplyBlock;
-  [self dismissSettingsPanel];
-  if (applyBlock != nil) {
-    applyBlock(selectedIndex);
-  }
+  return group;
 }
 
 - (void)applyCaptureRatio:(CGFloat)ratio {
@@ -766,6 +664,10 @@ typedef void (^CPCameraSelectionApplyBlock)(NSInteger selectedIndex);
         self.settingsButton = nil;
         [self.cameraRenderController.view removeFromSuperview];
         [self.cameraRenderController removeFromParentViewController];
+        if (self.previewBackgroundView != nil) {
+          [self.previewBackgroundView removeFromSuperview];
+          self.previewBackgroundView = nil;
+        }
         [self.gridOverlayView removeFromSuperview];
         self.gridOverlayView = nil;
 
@@ -825,6 +727,58 @@ typedef void (^CPCameraSelectionApplyBlock)(NSInteger selectedIndex);
     pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Session not started"];
     [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
   }
+}
+
+- (void) setPreviewBackgroundColor:(CDVInvokedUrlCommand*)command {
+  NSString *backgroundColor = command.arguments.count > 0 ? command.arguments[0] : nil;
+
+  // parse color similar to startCamera
+  UIColor *bgColorUIColor = [UIColor blackColor];
+  if ([backgroundColor isKindOfClass:[NSString class]] && ((NSString*)backgroundColor).length > 0) {
+    NSString *bg = (NSString*)backgroundColor;
+    if ([[bg lowercaseString] isEqualToString:@"transparent"]) {
+      bgColorUIColor = [UIColor clearColor];
+    } else {
+      NSString *c = bg;
+      if ([c hasPrefix:@"#"]) {
+        c = [c substringFromIndex:1];
+      }
+      unsigned int hex = 0;
+      NSScanner *scanner = [NSScanner scannerWithString:c];
+      [scanner scanHexInt:&hex];
+      if (c.length == 6) {
+        bgColorUIColor = [self colorWithHex:hex alpha:1.0];
+      } else if (c.length == 8) {
+        CGFloat a = ((hex >> 24) & 0xFF) / 255.0;
+        NSInteger rgb = hex & 0xFFFFFF;
+        bgColorUIColor = [self colorWithHex:rgb alpha:a];
+      } else {
+        bgColorUIColor = [self colorWithHex:hex alpha:1.0];
+      }
+    }
+  }
+
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (self.previewBackgroundView == nil) {
+      self.previewBackgroundView = [[UIView alloc] initWithFrame:self.viewController.view.bounds];
+      self.previewBackgroundView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    }
+
+    self.previewBackgroundView.backgroundColor = bgColorUIColor;
+
+    if (self.cameraRenderController != nil && self.cameraRenderController.view.superview != nil) {
+      // insert background below camera view
+      [self.cameraRenderController.view.superview insertSubview:self.previewBackgroundView belowSubview:self.cameraRenderController.view];
+    } else {
+      // fallback: add at bottom of main view
+      if (![self.previewBackgroundView isDescendantOfView:self.viewController.view]) {
+        [self.viewController.view insertSubview:self.previewBackgroundView atIndex:0];
+      }
+    }
+
+    CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
+    [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+  });
 }
 
 - (void) getSupportedFocusModes:(CDVInvokedUrlCommand*)command {
@@ -1229,6 +1183,114 @@ typedef void (^CPCameraSelectionApplyBlock)(NSInteger selectedIndex);
     }
 
     [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+}
+
+- (void) setCaptureRatio:(CDVInvokedUrlCommand*)command {
+  CDVPluginResult *pluginResult;
+
+  if (self.cameraRenderController == nil) {
+    pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Session not started"];
+    [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+    return;
+  }
+
+  id arg = command.arguments.count > 0 ? command.arguments[0] : nil;
+  CGFloat ratio = 0.0;
+  if ([arg isKindOfClass:[NSString class]]) {
+    NSString *s = (NSString*)arg;
+    if ([s isEqualToString:@"full"]) {
+      ratio = 0.0;
+    } else if ([s isEqualToString:@"4:3"]) {
+      ratio = 4.0/3.0;
+    } else if ([s isEqualToString:@"16:9"]) {
+      ratio = 16.0/9.0;
+    } else if ([s isEqualToString:@"1:1"]) {
+      ratio = 1.0;
+    } else {
+      ratio = 0.0;
+    }
+  } else if ([arg isKindOfClass:[NSNumber class]]) {
+    ratio = [arg doubleValue];
+  }
+
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [self applyCaptureRatio:ratio];
+  });
+
+  pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
+  [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+}
+
+- (void) setCaptureTimer:(CDVInvokedUrlCommand*)command {
+  CDVPluginResult *pluginResult;
+
+  if (self.cameraRenderController == nil) {
+    pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Session not started"];
+    [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+    return;
+  }
+
+  id arg = command.arguments.count > 0 ? command.arguments[0] : nil;
+  NSTimeInterval seconds = 0.0;
+  if ([arg isKindOfClass:[NSNumber class]]) {
+    seconds = [arg doubleValue];
+  } else if ([arg isKindOfClass:[NSString class]]) {
+    seconds = [(NSString*)arg doubleValue];
+  }
+
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [self applyCaptureTimer:seconds];
+  });
+
+  pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDouble:seconds];
+  [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+}
+
+- (void) setStoreToFile:(CDVInvokedUrlCommand*)command {
+  CDVPluginResult *pluginResult;
+
+  if (command.arguments.count == 0) {
+    pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Invalid parameters"];
+    [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+    return;
+  }
+
+  BOOL store = [[command.arguments objectAtIndex:0] boolValue];
+  self.storeToFile = store;
+
+  pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
+  [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+}
+
+- (void) setPreviewPosition:(CDVInvokedUrlCommand*)command {
+  CDVPluginResult *pluginResult;
+
+  if (self.cameraRenderController == nil) {
+    pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Session not started"];
+    [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+    return;
+  }
+
+  if (command.arguments.count < 2) {
+    pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Invalid parameters"];
+    [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+    return;
+  }
+
+  CGFloat x = (CGFloat)[[command.arguments objectAtIndex:0] floatValue] + self.webView.frame.origin.x;
+  CGFloat y = (CGFloat)[[command.arguments objectAtIndex:1] floatValue] + self.webView.frame.origin.y;
+
+  dispatch_async(dispatch_get_main_queue(), ^{
+    CGRect frame = self.cameraRenderController.view.frame;
+    frame.origin.x = x;
+    frame.origin.y = y;
+    self.cameraRenderController.view.frame = frame;
+    self.previewContainerFrame = frame;
+    [self applyCaptureRatio:self.desiredCaptureRatio];
+  });
+
+  pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
+  [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 }
 
 - (void) getSupportedPictureSizes:(CDVInvokedUrlCommand*)command {

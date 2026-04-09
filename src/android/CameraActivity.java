@@ -140,6 +140,12 @@ public class CameraActivity extends Fragment {
 
     // Inflate the layout for this fragment
     view = inflater.inflate(getResources().getIdentifier("camera_activity", "layout", appResourcesPackage), container, false);
+    // make fragment root view transparent so container background color is visible
+    try {
+      view.setBackgroundColor(Color.TRANSPARENT);
+    } catch (Exception e) {
+      Log.w(TAG, "Could not set fragment root background to transparent", e);
+    }
     createCameraPreview();
     return view;
   }
@@ -149,6 +155,43 @@ public class CameraActivity extends Fragment {
     this.y = y;
     this.width = width;
     this.height = height;
+  }
+
+  public void setDesiredPictureRatio(final String ratio) {
+    this.desiredPictureRatio = ratio;
+    if (frameContainerLayout != null) {
+      applyDesiredRatioToPreviewLayout(frameContainerLayout.getWidth(), frameContainerLayout.getHeight());
+      if (gridOverlayView != null) {
+        gridOverlayView.invalidate();
+      }
+    }
+  }
+
+  public void setCaptureDelaySeconds(final int seconds) {
+    this.captureDelaySeconds = Math.max(0, seconds);
+  }
+
+  public void updatePreviewPosition(final int px, final int py) {
+    this.x = px;
+    this.y = py;
+    if (frameContainerLayout != null) {
+      final FrameLayout fcl = frameContainerLayout;
+      final int left = px;
+      final int top = py;
+      getActivity().runOnUiThread(new Runnable() {
+        @Override
+        public void run() {
+          try {
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) fcl.getLayoutParams();
+            lp.leftMargin = left;
+            lp.topMargin = top;
+            fcl.setLayoutParams(lp);
+          } catch (Exception e) {
+            Log.e(TAG, "updatePreviewPosition failed", e);
+          }
+        }
+      });
+    }
   }
 
   private void createCameraPreview(){
@@ -498,56 +541,82 @@ public class CameraActivity extends Fragment {
     ScrollView scrollView = new ScrollView(activity);
     LinearLayout root = new LinearLayout(activity);
     root.setOrientation(LinearLayout.VERTICAL);
-    int padding = dp(16);
+    int padding = dp(12);
     root.setPadding(padding, padding, padding, padding);
 
     GradientDrawable cardBg = new GradientDrawable();
     cardBg.setColor(Color.parseColor("#FAFAFA"));
-    cardBg.setCornerRadius(dp(16));
+    cardBg.setCornerRadius(dp(14));
     root.setBackground(cardBg);
 
     TextView title = new TextView(activity);
     title.setText("相机设置");
     title.setTextColor(Color.parseColor("#1F2937"));
-    title.setTextSize(18);
-    title.setPadding(0, 0, 0, dp(6));
+    title.setTextSize(17);
+    title.setPadding(0, 0, 0, dp(4));
     root.addView(title);
 
     TextView subtitle = new TextView(activity);
-    subtitle.setText("在当前页面调整参数，立即生效");
+    subtitle.setText("全部选项集中展示，点击即生效");
     subtitle.setTextColor(Color.parseColor("#6B7280"));
-    subtitle.setTextSize(13);
-    subtitle.setPadding(0, 0, 0, dp(12));
+    subtitle.setTextSize(12);
+    subtitle.setPadding(0, 0, 0, dp(10));
     root.addView(subtitle);
 
-    TextView sectionTitle = new TextView(activity);
-    sectionTitle.setText("基础设置");
-    sectionTitle.setTextColor(Color.parseColor("#9CA3AF"));
-    sectionTitle.setTextSize(12);
-    sectionTitle.setPadding(0, 0, 0, dp(8));
-    root.addView(sectionTitle);
-
-    root.addView(createSettingsRow(activity, "比", "拍照比例", getRatioLabel(), new View.OnClickListener() {
+    final String[] ratioOptions = new String[] {"全屏", "4:3", "16:9", "1:1"};
+    int ratioIndex = 0;
+    if (!RATIO_FULL.equals(desiredPictureRatio)) {
+      for (int i = 1; i < ratioOptions.length; i++) {
+        if (ratioOptions[i].equals(desiredPictureRatio)) {
+          ratioIndex = i;
+          break;
+        }
+      }
+    }
+    root.addView(createInlineOptionGroup(activity, "拍照比例", ratioOptions, ratioIndex, new OnInlineOptionSelected() {
       @Override
-      public void onClick(View v) {
-        dialog.dismiss();
-        showRatioSettingsDialog();
+      public void onSelected(int selectedIndex) {
+        if (selectedIndex == 0) {
+          desiredPictureRatio = RATIO_FULL;
+        } else {
+          desiredPictureRatio = ratioOptions[selectedIndex];
+        }
+        if (frameContainerLayout != null) {
+          applyDesiredRatioToPreviewLayout(frameContainerLayout.getWidth(), frameContainerLayout.getHeight());
+        }
       }
     }));
 
-    root.addView(createSettingsRow(activity, "网", "网格样式", getGridStyleLabel(), new View.OnClickListener() {
+    final String[] gridOptions = new String[] {"关闭", "九宫格", "米字格"};
+    root.addView(createInlineOptionGroup(activity, "网格样式", gridOptions, gridStyleMode, new OnInlineOptionSelected() {
       @Override
-      public void onClick(View v) {
-        dialog.dismiss();
-        showGridStyleSettingsDialog();
+      public void onSelected(int selectedIndex) {
+        gridStyleMode = selectedIndex;
+        if (gridOverlayView != null) {
+          gridOverlayView.setGridStyleMode(gridStyleMode);
+          gridOverlayView.setVisibility(gridStyleMode == GRID_STYLE_OFF ? View.GONE : View.VISIBLE);
+          gridOverlayView.invalidate();
+        }
       }
     }));
 
-    root.addView(createSettingsRow(activity, "时", "计时拍照", getCaptureDelayLabel(), new View.OnClickListener() {
+    final String[] timerOptions = new String[] {"关闭", "3秒", "5秒"};
+    int timerIndex = 0;
+    if (captureDelaySeconds == 3) {
+      timerIndex = 1;
+    } else if (captureDelaySeconds == 5) {
+      timerIndex = 2;
+    }
+    root.addView(createInlineOptionGroup(activity, "计时拍照", timerOptions, timerIndex, new OnInlineOptionSelected() {
       @Override
-      public void onClick(View v) {
-        dialog.dismiss();
-        showCaptureDelaySettingsDialog();
+      public void onSelected(int selectedIndex) {
+        if (selectedIndex == 1) {
+          captureDelaySeconds = 3;
+        } else if (selectedIndex == 2) {
+          captureDelaySeconds = 5;
+        } else {
+          captureDelaySeconds = 0;
+        }
       }
     }));
 
@@ -571,7 +640,7 @@ public class CameraActivity extends Fragment {
     closeBg.setCornerRadius(dp(10));
     closeButton.setBackground(closeBg);
     LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-    closeLp.topMargin = dp(12);
+    closeLp.topMargin = dp(10);
     closeButton.setLayoutParams(closeLp);
     closeButton.setOnClickListener(new View.OnClickListener() {
       @Override
@@ -584,6 +653,83 @@ public class CameraActivity extends Fragment {
     scrollView.addView(root);
     dialog.setView(scrollView);
     dialog.show();
+  }
+
+  private interface OnInlineOptionSelected {
+    void onSelected(int selectedIndex);
+  }
+
+  private View createInlineOptionGroup(Context context, String label, String[] options, int selectedIndex, final OnInlineOptionSelected listener) {
+    LinearLayout group = new LinearLayout(context);
+    group.setOrientation(LinearLayout.VERTICAL);
+
+    TextView labelView = new TextView(context);
+    labelView.setText(label);
+    labelView.setTextColor(Color.parseColor("#4B5563"));
+    labelView.setTextSize(13);
+    labelView.setPadding(dp(2), 0, dp(2), dp(6));
+    group.addView(labelView);
+
+    final LinearLayout optionsRow = new LinearLayout(context);
+    optionsRow.setOrientation(LinearLayout.HORIZONTAL);
+    optionsRow.setBaselineAligned(false);
+    group.addView(optionsRow);
+
+    int safeSelectedIndex = Math.max(0, Math.min(selectedIndex, options.length - 1));
+    for (int i = 0; i < options.length; i++) {
+      final int index = i;
+      final TextView chip = createOptionChip(context, options[i], i == safeSelectedIndex);
+      chip.setOnClickListener(new View.OnClickListener() {
+        @Override
+        public void onClick(View v) {
+          for (int child = 0; child < optionsRow.getChildCount(); child++) {
+            View childView = optionsRow.getChildAt(child);
+            if (childView instanceof TextView) {
+              updateOptionChipStyle((TextView) childView, child == index);
+            }
+          }
+          if (listener != null) {
+            listener.onSelected(index);
+          }
+        }
+      });
+      optionsRow.addView(chip);
+    }
+
+    LinearLayout.LayoutParams groupLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+    groupLp.bottomMargin = dp(8);
+    group.setLayoutParams(groupLp);
+    return group;
+  }
+
+  private TextView createOptionChip(Context context, String text, boolean selected) {
+    TextView chip = new TextView(context);
+    chip.setText(text);
+    chip.setGravity(Gravity.CENTER);
+    chip.setTextSize(12);
+    chip.setPadding(dp(10), dp(6), dp(10), dp(6));
+
+    LinearLayout.LayoutParams chipLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+    chipLp.rightMargin = dp(6);
+    chip.setLayoutParams(chipLp);
+
+    updateOptionChipStyle(chip, selected);
+    return chip;
+  }
+
+  private void updateOptionChipStyle(TextView chip, boolean selected) {
+    GradientDrawable chipBg = new GradientDrawable();
+    chipBg.setCornerRadius(dp(8));
+    if (selected) {
+      chipBg.setColor(Color.parseColor("#EAF2FF"));
+      chipBg.setStroke(dp(1), Color.parseColor("#3B82F6"));
+      chip.setTextColor(Color.parseColor("#1D4ED8"));
+    } else {
+      chipBg.setColor(Color.WHITE);
+      chipBg.setStroke(dp(1), Color.parseColor("#E5E7EB"));
+      chip.setTextColor(Color.parseColor("#374151"));
+    }
+    chip.setBackground(chipBg);
   }
 
   private View createSettingsRow(Context context, String iconText, String label, String value, View.OnClickListener clickListener) {

@@ -42,6 +42,10 @@ CameraPreview.startCamera = function(options, onSuccess, onError) {
     options.alpha = 1;
   }
 
+  if (typeof(options.backgroundColor) === 'undefined') {
+    options.backgroundColor = '#000000';
+  }
+
   options.disableExifHeaderStripping = options.disableExifHeaderStripping || false;
 
   options.storeToFile = options.storeToFile || false;
@@ -58,6 +62,7 @@ CameraPreview.startCamera = function(options, onSuccess, onError) {
     options.previewDrag, 
     options.toBack, 
     options.alpha, 
+    options.backgroundColor,
     options.tapFocus, 
     options.disableExifHeaderStripping, 
     options.storeToFile,
@@ -148,6 +153,60 @@ CameraPreview.setPreviewSize = function(dimensions, onSuccess, onError) {
   dimensions.height = dimensions.height || window.screen.height;
 
   exec(onSuccess, onError, PLUGIN_NAME, "setPreviewSize", [dimensions.width, dimensions.height]);
+};
+
+// Runtime: set the preview background color (hex string like '#RRGGBB' or 'transparent')
+CameraPreview.setPreviewBackgroundColor = function(color, onSuccess, onError) {
+  if (!color) {
+    if (isFunction(onError)) {
+      onError('No color specified');
+    }
+    return false;
+  }
+
+  exec(onSuccess, onError, PLUGIN_NAME, "setPreviewBackgroundColor", [color]);
+};
+
+/**
+ * Set desired capture ratio. Accepts: 'full', '4:3', '16:9', '1:1'
+ */
+CameraPreview.setCaptureRatio = function(ratio, onSuccess, onError) {
+  exec(onSuccess, onError, PLUGIN_NAME, "setCaptureRatio", [ratio]);
+};
+
+/**
+ * Set whether pictures should be stored to file (true) or returned as base64 (false).
+ */
+CameraPreview.setStoreToFile = function(storeToFile, onSuccess, onError) {
+  exec(onSuccess, onError, PLUGIN_NAME, "setStoreToFile", [!!storeToFile]);
+};
+
+/**
+ * Set capture timer in seconds (0 to disable, or e.g. 3, 5)
+ */
+CameraPreview.setCaptureTimer = function(seconds, onSuccess, onError) {
+  var s = parseInt(seconds, 10) || 0;
+  exec(onSuccess, onError, PLUGIN_NAME, "setCaptureTimer", [s]);
+};
+
+/**
+ * Update preview position after camera has been started.
+ * Accepts either (x, y, onSuccess, onError) or ( {x:.., y:..}, onSuccess, onError )
+ */
+CameraPreview.setPreviewPosition = function(xOrPos, y, onSuccess, onError) {
+  var xVal, yVal, cbSuccess, cbError;
+  if (typeof xOrPos === 'object') {
+    xVal = xOrPos.x || 0;
+    yVal = xOrPos.y || 0;
+    cbSuccess = y;
+    cbError = onSuccess;
+  } else {
+    xVal = xOrPos || 0;
+    yVal = y || 0;
+    cbSuccess = onSuccess;
+    cbError = onError;
+  }
+  exec(cbSuccess, cbError, PLUGIN_NAME, "setPreviewPosition", [xVal, yVal]);
 };
 
 CameraPreview.getSupportedPictureSizes = function(onSuccess, onError) {
