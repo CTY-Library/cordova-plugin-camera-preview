@@ -149,8 +149,11 @@ CameraPreview.getHorizontalFOV = function(onSuccess, onError) {
 
 CameraPreview.setPreviewSize = function(dimensions, onSuccess, onError) {
   dimensions = dimensions || {};
-  dimensions.width = dimensions.width || window.screen.width;
-  dimensions.height = dimensions.height || window.screen.height;
+  var inputWidth = dimensions.width;
+  var inputHeight = dimensions.height;
+  
+  dimensions.width = Number(inputWidth) || window.screen.width;
+  dimensions.height = Number(inputHeight) || window.screen.height;
 
   exec(onSuccess, onError, PLUGIN_NAME, "setPreviewSize", [dimensions.width, dimensions.height]);
 };
