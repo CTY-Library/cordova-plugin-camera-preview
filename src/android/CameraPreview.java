@@ -976,6 +976,11 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
       return true;
     }
 
+    if (width <= 0 || height <= 0) {
+        callbackContext.error("Invalid preview size");
+        return true;
+    }
+
     Camera camera = fragment.getCamera();
     Camera.Parameters params = camera.getParameters();
 
