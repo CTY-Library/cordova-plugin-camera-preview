@@ -31,6 +31,8 @@ class Preview extends RelativeLayout implements SurfaceHolder.Callback {
   int facing = Camera.CameraInfo.CAMERA_FACING_BACK;
   int viewWidth;
   int viewHeight;
+  int requestedPreviewWidth = -1;
+  int requestedPreviewHeight = -1;
 
   Preview(Context context) {
     super(context);
@@ -86,6 +88,70 @@ class Preview extends RelativeLayout implements SurfaceHolder.Callback {
       mCamera.setParameters(parameters);
     }
   }
+
+  public Camera.Size setRequestedPreviewSize(int width, int height) {
+    if (mCamera == null) {
+      return null;
+    }
+
+    requestedPreviewWidth = width;
+    requestedPreviewHeight = height;
+
+    Camera.Parameters parameters = mCamera.getParameters();
+    mSupportedPreviewSizes = parameters.getSupportedPreviewSizes();
+    Camera.Size selectedSize = resolvePreviewSize(
+      mSupportedPreviewSizes,
+      mSurfaceView.getWidth(),
+      mSurfaceView.getHeight()
+    );
+
+    if (selectedSize == null) {
+      return null;
+    }
+
+    mPreviewSize = selectedSize;
+    parameters.setPreviewSize(mPreviewSize.width, mPreviewSize.height);
+    mCamera.setParameters(parameters);
+    requestLayout();
+    invalidate();
+
+    return mPreviewSize;
+  }
+
+  private boolean hasRequestedPreviewSize() {
+    return requestedPreviewWidth > 0 && requestedPreviewHeight > 0;
+  }
+
+  private Camera.Size resolvePreviewSize(List<Camera.Size> sizes, int width, int height) {
+    if (sizes == null || sizes.isEmpty()) {
+      return null;
+    }
+
+    if (hasRequestedPreviewSize()) {
+      return getClosestPreviewSize(sizes, requestedPreviewWidth, requestedPreviewHeight);
+    }
+
+    return getOptimalPreviewSize(sizes, width, height);
+  }
+
+  private Camera.Size getClosestPreviewSize(List<Camera.Size> sizes, int width, int height) {
+    Camera.Size bestSize = null;
+    long bestScore = Long.MAX_VALUE;
+
+    for (Camera.Size size : sizes) {
+      long directScore = Math.abs((long) size.width - width) + Math.abs((long) size.height - height);
+      long rotatedScore = Math.abs((long) size.width - height) + Math.abs((long) size.height - width);
+      long score = Math.min(directScore, rotatedScore);
+
+      if (score < bestScore) {
+        bestScore = score;
+        bestSize = size;
+      }
+    }
+
+    return bestSize;
+  }
+
   private void setCameraDisplayOrientation() {
     Camera.CameraInfo info = new Camera.CameraInfo();
     int rotation = ((Activity) getContext()).getWindowManager().getDefaultDisplay().getRotation();
@@ -141,7 +207,7 @@ class Preview extends RelativeLayout implements SurfaceHolder.Callback {
       Log.d("CameraPreview", "before setPreviewSize");
 
       mSupportedPreviewSizes = parameters.getSupportedPreviewSizes();
-      mPreviewSize = getOptimalPreviewSize(mSupportedPreviewSizes, mSurfaceView.getWidth(), mSurfaceView.getHeight());
+      mPreviewSize = resolvePreviewSize(mSupportedPreviewSizes, mSurfaceView.getWidth(), mSurfaceView.getHeight());
       parameters.setPreviewSize(mPreviewSize.width, mPreviewSize.height);
       Log.d(TAG, mPreviewSize.width + " " + mPreviewSize.height);
 
@@ -161,7 +227,7 @@ class Preview extends RelativeLayout implements SurfaceHolder.Callback {
     setMeasuredDimension(width, height);
 
     if (mSupportedPreviewSizes != null) {
-      mPreviewSize = getOptimalPreviewSize(mSupportedPreviewSizes, width, height);
+      mPreviewSize = resolvePreviewSize(mSupportedPreviewSizes, width, height);
     }
   }
 
@@ -292,7 +358,7 @@ class Preview extends RelativeLayout implements SurfaceHolder.Callback {
         // the preview.
         mSupportedPreviewSizes = mCamera.getParameters().getSupportedPreviewSizes();
         if (mSupportedPreviewSizes != null) {
-          mPreviewSize = getOptimalPreviewSize(mSupportedPreviewSizes, w, h);
+          mPreviewSize = resolvePreviewSize(mSupportedPreviewSizes, w, h);
         }
         Camera.Parameters parameters = mCamera.getParameters();
         parameters.setPreviewSize(mPreviewSize.width, mPreviewSize.height);

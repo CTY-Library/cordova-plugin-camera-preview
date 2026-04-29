@@ -977,52 +977,34 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
     }
 
     if (width <= 0 || height <= 0) {
-        callbackContext.error("Invalid preview size");
-        return true;
-    }
-
-    Camera camera = fragment.getCamera();
-    Camera.Parameters params = camera.getParameters();
-
-    List<Camera.Size> supportedPreviewSizes = params.getSupportedPreviewSizes();
-    if (supportedPreviewSizes == null || supportedPreviewSizes.isEmpty()) {
-      callbackContext.error("No supported preview sizes");
+      callbackContext.error("Invalid preview size");
       return true;
     }
 
-    Camera.Size bestSize = null;
-    long bestScore = Long.MAX_VALUE;
+    final DisplayMetrics metrics = cordova.getActivity().getResources().getDisplayMetrics();
+    final int computedWidth = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, width, metrics);
+    final int computedHeight = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, height, metrics);
 
-    for (Camera.Size size : supportedPreviewSizes) {
-      long directScore = Math.abs((long)size.width - width) + Math.abs((long)size.height - height);
-      long rotatedScore = Math.abs((long)size.width - height) + Math.abs((long)size.height - width);
-      long score = Math.min(directScore, rotatedScore);
+    cordova.getActivity().runOnUiThread(new Runnable() {
+      @Override
+      public void run() {
+        try {
+          Camera.Size appliedSize = fragment.setPreviewSize(computedWidth, computedHeight);
+          if (appliedSize == null) {
+            callbackContext.error("No preview size matched");
+            return;
+          }
 
-      if (score < bestScore) {
-        bestScore = score;
-        bestSize = size;
+          JSONObject result = new JSONObject();
+          result.put("width", appliedSize.width);
+          result.put("height", appliedSize.height);
+          callbackContext.success(result);
+        } catch (Exception e) {
+          Log.e(TAG, "setPreviewSize failed", e);
+          callbackContext.error("setPreviewSize failed: " + e.getMessage());
+        }
       }
-    }
-
-    if (bestSize == null) {
-      callbackContext.error("No preview size matched");
-      return true;
-    }
-
-    try {
-      camera.stopPreview();
-      params.setPreviewSize(bestSize.width, bestSize.height);
-      fragment.setCameraParameters(params);
-      camera.startPreview();
-
-      JSONObject result = new JSONObject();
-      result.put("width", bestSize.width);
-      result.put("height", bestSize.height);
-      callbackContext.success(result);
-    } catch (Exception e) {
-      Log.e(TAG, "setPreviewSize failed", e);
-      callbackContext.error("setPreviewSize failed: " + e.getMessage());
-    }
+    });
 
     return true;
   }

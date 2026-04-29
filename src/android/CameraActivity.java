@@ -1171,6 +1171,40 @@ public class CameraActivity extends Fragment {
     }
   }
 
+  public Camera.Size setPreviewSize(int width, int height) {
+    if (mPreview == null || mCamera == null) {
+      return null;
+    }
+
+    this.width = width;
+    this.height = height;
+
+    if (frameContainerLayout != null) {
+      ViewGroup.LayoutParams layoutParams = frameContainerLayout.getLayoutParams();
+      if (layoutParams instanceof FrameLayout.LayoutParams) {
+        FrameLayout.LayoutParams frameLayoutParams = (FrameLayout.LayoutParams) layoutParams;
+        frameLayoutParams.width = width;
+        frameLayoutParams.height = height;
+        frameContainerLayout.setLayoutParams(frameLayoutParams);
+      } else if (layoutParams != null) {
+        layoutParams.width = width;
+        layoutParams.height = height;
+        frameContainerLayout.setLayoutParams(layoutParams);
+      }
+
+      applyDesiredRatioToPreviewLayout(width, height);
+      frameContainerLayout.requestLayout();
+      frameContainerLayout.invalidate();
+    }
+
+    Camera.Size appliedSize = mPreview.setRequestedPreviewSize(width, height);
+    if (appliedSize != null) {
+      cameraParameters = mCamera.getParameters();
+    }
+
+    return appliedSize;
+  }
+
   public boolean hasFrontCamera(){
     return getActivity().getApplicationContext().getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA_FRONT);
   }
