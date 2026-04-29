@@ -188,7 +188,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
       [self.viewController.view insertSubview:self.cameraRenderController.view aboveSubview:self.previewBackgroundView];
     }
 
-    [self setupIOSSettingsButtonIfNeeded:toBack enabled:enableAutoSettings];
+    [self setupIOSSettingsButtonIfNeeded:enableAutoSettings];
 
     // Setup session
     self.sessionManager.delegate = self.cameraRenderController;
@@ -212,8 +212,8 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
   }
 }
 
-- (void) setupIOSSettingsButtonIfNeeded:(BOOL)toBack enabled:(BOOL)enabled {
-  if (toBack || !enabled || self.cameraRenderController == nil) {
+- (void) setupIOSSettingsButtonIfNeeded:(BOOL)enabled {
+  if (!enabled || self.cameraRenderController == nil) {
     return;
   }
 

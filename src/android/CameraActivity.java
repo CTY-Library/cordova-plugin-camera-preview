@@ -219,9 +219,7 @@ public class CameraActivity extends Fragment {
 
       mainLayout.setEnabled(false);
 
-        if(toBack == false) {
-            this.setupTouchAndBackButton();
-        }
+      this.setupTouchAndBackButton();
 
     }
   }
