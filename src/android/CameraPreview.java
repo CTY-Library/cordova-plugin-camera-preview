@@ -1366,7 +1366,7 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
       permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE);
       permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
     }
-
+ 
     return permissions.toArray(new String[0]);
   }
 }

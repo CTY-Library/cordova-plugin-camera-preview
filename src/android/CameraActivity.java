@@ -234,19 +234,24 @@ public class CameraActivity extends Fragment {
       public void run() {
         final ImageButton settingsButton = (ImageButton) view.findViewById(getResources().getIdentifier("camera_settings_button", "id", appResourcesPackage));
         if (settingsButton != null) {
-          settingsButton.setVisibility(View.VISIBLE);
+          if (enableAutoSettings) {
+            settingsButton.setVisibility(View.VISIBLE);
 
-          FrameLayout.LayoutParams settingsLayoutParams = (FrameLayout.LayoutParams) settingsButton.getLayoutParams();
-          int extraTopMargin = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 8f, getResources().getDisplayMetrics());
-          settingsLayoutParams.topMargin = Math.max(settingsLayoutParams.topMargin, getStatusBarHeight() + extraTopMargin);
-          settingsButton.setLayoutParams(settingsLayoutParams);
+            FrameLayout.LayoutParams settingsLayoutParams = (FrameLayout.LayoutParams) settingsButton.getLayoutParams();
+            int extraTopMargin = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 8f, getResources().getDisplayMetrics());
+            settingsLayoutParams.topMargin = Math.max(settingsLayoutParams.topMargin, getStatusBarHeight() + extraTopMargin);
+            settingsButton.setLayoutParams(settingsLayoutParams);
 
-          settingsButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-              showInAppCameraSettingsDialog();
-            }
-          });
+            settingsButton.setOnClickListener(new View.OnClickListener() {
+              @Override
+              public void onClick(View v) {
+                showInAppCameraSettingsDialog();
+              }
+            });
+          } else {
+            settingsButton.setVisibility(View.GONE);
+            settingsButton.setOnClickListener(null);
+          }
         }
 
         frameContainerLayout.setClickable(true);
