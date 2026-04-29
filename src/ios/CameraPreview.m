@@ -1161,28 +1161,46 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
 
 - (void) setPreviewSize: (CDVInvokedUrlCommand*)command {
 
-    CDVPluginResult *pluginResult;
-
-    if (self.sessionManager == nil) {
-        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Session not started"];
-        [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
-        return;
+    if (self.sessionManager == nil || self.cameraRenderController == nil) {
+      CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Session not started"];
+      [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+      return;
     }
 
-    if (command.arguments.count > 1) {
-        CGFloat width = (CGFloat)[command.arguments[0] floatValue];
-        CGFloat height = (CGFloat)[command.arguments[1] floatValue];
-
-      self.previewContainerFrame = CGRectMake(0, 0, width, height);
-      self.cameraRenderController.view.frame = self.previewContainerFrame;
-        [self applyCaptureRatio:self.desiredCaptureRatio];
-
-        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
-    } else {
-        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Invalid number of parameters"];
+    if (command.arguments.count < 2) {
+      CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Invalid number of parameters"];
+      [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+      return;
     }
 
-    [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+    CGFloat width = (CGFloat)[command.arguments[0] floatValue];
+    CGFloat height = (CGFloat)[command.arguments[1] floatValue];
+    if (width <= 0 || height <= 0) {
+      CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Invalid preview size"];
+      [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+      return;
+    }
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+      CGRect container = self.previewContainerFrame;
+      if (container.size.width <= 0 || container.size.height <= 0) {
+        container = self.cameraRenderController.view.frame;
+      }
+
+      // Keep the current preview position and only update the container size.
+      container.size.width = width;
+      container.size.height = height;
+      self.previewContainerFrame = container;
+
+      [self applyCaptureRatio:self.desiredCaptureRatio];
+
+      NSDictionary *result = @{
+        @"width": @(CGRectGetWidth(self.cameraRenderController.view.frame)),
+        @"height": @(CGRectGetHeight(self.cameraRenderController.view.frame))
+      };
+      CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:result];
+      [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+    });
 }
 
 - (void) setCaptureRatio:(CDVInvokedUrlCommand*)command {
