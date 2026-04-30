@@ -2,8 +2,60 @@
 
 @implementation CameraSessionManager
 
+- (UIInterfaceOrientation)currentInterfaceOrientation {
+  if (@available(iOS 13.0, *)) {
+    NSSet<UIScene *> *connectedScenes = [UIApplication sharedApplication].connectedScenes;
+    for (UIScene *scene in connectedScenes) {
+      if ([scene isKindOfClass:[UIWindowScene class]] && scene.activationState == UISceneActivationStateForegroundActive) {
+        return ((UIWindowScene *)scene).interfaceOrientation;
+      }
+    }
+  }
+
+  return UIInterfaceOrientationPortrait;
+}
+
+- (UIViewController *)topViewController {
+  UIViewController *rootViewController = nil;
+
+  if (@available(iOS 13.0, *)) {
+    NSSet<UIScene *> *connectedScenes = [UIApplication sharedApplication].connectedScenes;
+    for (UIScene *scene in connectedScenes) {
+      if (![scene isKindOfClass:[UIWindowScene class]]) {
+        continue;
+      }
+
+      UIWindowScene *windowScene = (UIWindowScene *)scene;
+      for (UIWindow *window in windowScene.windows) {
+        if (window.isKeyWindow) {
+          rootViewController = window.rootViewController;
+          break;
+        }
+      }
+
+      if (rootViewController != nil) {
+        break;
+      }
+    }
+  }
+
+  if (rootViewController == nil) {
+    id<UIApplicationDelegate> appDelegate = [UIApplication sharedApplication].delegate;
+    if ([appDelegate respondsToSelector:@selector(window)]) {
+      rootViewController = appDelegate.window.rootViewController;
+    }
+  }
+
+  while (rootViewController.presentedViewController != nil) {
+    rootViewController = rootViewController.presentedViewController;
+  }
+
+  return rootViewController;
+}
+
 - (CameraSessionManager *)init {
-  if (self = [super init]) {
+  self = [super init];
+  if (self) {
     // Create the AVCaptureSession
     self.session = [[AVCaptureSession alloc] init];
     self.sessionQueue = dispatch_queue_create("session queue", DISPATCH_QUEUE_SERIAL);
@@ -67,7 +119,7 @@
 }
 
 - (AVCaptureVideoOrientation) getCurrentOrientation {
-  return [self getCurrentOrientation: [[UIApplication sharedApplication] statusBarOrientation]];
+  return [self getCurrentOrientation:[self currentInterfaceOrientation]];
 }
 
 - (AVCaptureVideoOrientation) getCurrentOrientation:(UIInterfaceOrientation)toInterfaceOrientation {
@@ -95,10 +147,10 @@
 
   dispatch_async(self.sessionQueue, ^{
       NSError *error = nil;
-      BOOL success = TRUE;
+      BOOL success = YES;
 
       NSLog(@"defaultCamera: %@", defaultCamera);
-      if ([defaultCamera isEqual: @"front"]) {
+      if ([defaultCamera isEqualToString:@"front"]) {
         self.defaultCamera = AVCaptureDevicePositionFront;
       } else {
         self.defaultCamera = AVCaptureDevicePositionBack;
@@ -112,7 +164,7 @@
           [videoDevice unlockForConfiguration];
         } else {
           NSLog(@"%@", error);
-          success = FALSE;
+          success = NO;
         }
       }
 
@@ -120,7 +172,7 @@
 
       if (error) {
         NSLog(@"%@", error);
-        success = FALSE;
+        success = NO;
       }
 
       if ([self.session canAddInput:videoDeviceInput]) {
@@ -139,7 +191,7 @@
       if ([self.session canAddOutput:dataOutput]) {
         self.dataOutput = dataOutput;
         [dataOutput setAlwaysDiscardsLateVideoFrames:YES];
-        [dataOutput setVideoSettings:[NSDictionary dictionaryWithObject:[NSNumber numberWithInt:kCVPixelFormatType_32BGRA] forKey:(id)kCVPixelBufferPixelFormatTypeKey]];
+        [dataOutput setVideoSettings:@{(NSString *)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA)}];
 
         [dataOutput setSampleBufferDelegate:self.delegate queue:self.sessionQueue];
 
@@ -178,7 +230,7 @@
 
   dispatch_async([self sessionQueue], ^{
       NSError *error = nil;
-      BOOL success = TRUE;
+      BOOL success = YES;
 
       [self.session beginConfiguration];
 
@@ -197,7 +249,7 @@
           [videoDevice unlockForConfiguration];
         } else {
           NSLog(@"%@", error);
-          success = FALSE;
+          success = NO;
         }
       }
 
@@ -205,7 +257,7 @@
 
       if (error) {
         NSLog(@"%@", error);
-        success = FALSE;
+        success = NO;
       }
 
       if ([self.session canAddInput:videoDeviceInput]) {
@@ -268,19 +320,19 @@
   AVCaptureDevice * videoDevice = [self cameraWithPosition: self.defaultCamera];
   [self.device lockForConfiguration:nil];
 
-  if ([focusMode isEqual:@"fixed"]) {
+  if ([focusMode isEqualToString:@"fixed"]) {
     if ([videoDevice isFocusModeSupported:0]) {
       videoDevice.focusMode = 0;
     } else {
       errMsg = @"Focus mode not supported";
     };
-  } else if ([focusMode isEqual:@"auto"]) {
+  } else if ([focusMode isEqualToString:@"auto"]) {
     if ([videoDevice isFocusModeSupported:1]) {
       videoDevice.focusMode = 1;
     } else {
       errMsg = @"Focus mode not supported";
     };
-  } else if ([focusMode isEqual:@"continuous"]) {
+  } else if ([focusMode isEqualToString:@"continuous"]) {
     if ([videoDevice isFocusModeSupported:2]) {
       videoDevice.focusMode = 2;
     } else {
@@ -390,7 +442,7 @@
 
   [self.device setVideoZoomFactor:self.videoZoomFactor];
   [self.device unlockForConfiguration];
-  NSLog(@"%zd zoom factor set", self.videoZoomFactor);
+  NSLog(@"%f zoom factor set", (double)self.videoZoomFactor);
 }
 
 - (CGFloat)getZoom {
@@ -464,25 +516,25 @@
   AVCaptureDevice * videoDevice = [self cameraWithPosition: self.defaultCamera];
   [self.device lockForConfiguration:nil];
 
-  if ([exposureMode isEqual:@"lock"]) {
+  if ([exposureMode isEqualToString:@"lock"]) {
     if ([videoDevice isExposureModeSupported:0]) {
       videoDevice.exposureMode = 0;
     } else {
       errMsg = @"Exposure mode not supported";
     };
-  } else if ([exposureMode isEqual:@"auto"]) {
+  } else if ([exposureMode isEqualToString:@"auto"]) {
     if ([videoDevice isExposureModeSupported:1]) {
       videoDevice.exposureMode = 1;
     } else {
       errMsg = @"Exposure mode not supported";
     };
-  } else if ([exposureMode isEqual:@"continuous"]) {
+  } else if ([exposureMode isEqualToString:@"continuous"]) {
     if ([videoDevice isExposureModeSupported:2]) {
       videoDevice.exposureMode = 2;
     } else {
       errMsg = @"Exposure mode not supported";
     };
-  } else if ([exposureMode isEqual:@"custom"]) {
+  } else if ([exposureMode isEqualToString:@"custom"]) {
     if ([videoDevice isExposureModeSupported:3]) {
       videoDevice.exposureMode = 3;
     } else {
@@ -514,7 +566,7 @@
 - (CGFloat)getExposureCompensation {
 
   AVCaptureDevice * videoDevice = [self cameraWithPosition: self.defaultCamera];
-  NSLog(@"getExposureCompensation: %zd", videoDevice.exposureTargetBias);
+  NSLog(@"getExposureCompensation: %f", (double)videoDevice.exposureTargetBias);
   return videoDevice.exposureTargetBias;
 }
 
@@ -548,7 +600,7 @@
 
   NSEnumerator *enumerator = [self.colorTemperatures objectEnumerator];
   TemperatureAndTint * wbTemperature;
-  while (wbTemperature =[ enumerator nextObject]) {
+  while ((wbTemperature = [enumerator nextObject])) {
     AVCaptureWhiteBalanceTemperatureAndTintValues temperatureAndTintValues;
     temperatureAndTintValues.temperature = (wbTemperature.minTemperature + wbTemperature.maxTemperature) / 2;
     temperatureAndTintValues.tint = wbTemperature.tint;
@@ -606,19 +658,19 @@
   AVCaptureDevice * videoDevice = [self cameraWithPosition: self.defaultCamera];
   [self.device lockForConfiguration:nil];
 
-  if ([whiteBalanceMode isEqual:@"lock"]) {
+  if ([whiteBalanceMode isEqualToString:@"lock"]) {
     if ([videoDevice isWhiteBalanceModeSupported:0]) {
       videoDevice.whiteBalanceMode = 0;
     } else {
       errMsg = @"White balance mode not supported";
     };
-  } else if ([whiteBalanceMode isEqual:@"auto"]) {
+  } else if ([whiteBalanceMode isEqualToString:@"auto"]) {
     if ([videoDevice isWhiteBalanceModeSupported:1]) {
       videoDevice.whiteBalanceMode = 1;
   } else {
       errMsg = @"White balance mode not supported";
     };
-  } else if ([whiteBalanceMode isEqual:@"continuous"]) {
+  } else if ([whiteBalanceMode isEqualToString:@"continuous"]) {
     if ([videoDevice isWhiteBalanceModeSupported:2]) {
       videoDevice.whiteBalanceMode = 2;
     } else {
@@ -671,7 +723,7 @@
 
 - (void) takePictureOnFocus{
     // add an observer, when takePictureOnFocus is requested.
-    int flag = NSKeyValueObservingOptionNew;
+  NSKeyValueObservingOptions flag = NSKeyValueObservingOptionNew;
     [self.device addObserver:self forKeyPath:@"adjustingFocus" options:flag context:nil];
 }
 
@@ -698,17 +750,23 @@
 }
 
 - (void)checkDeviceAuthorizationStatus {
-  NSString *mediaType = AVMediaTypeVideo;
+  AVMediaType mediaType = AVMediaTypeVideo;
 
   [AVCaptureDevice requestAccessForMediaType:mediaType completionHandler:^(BOOL granted) {
     if (!granted) {
       //Not granted access to mediaType
       dispatch_async(dispatch_get_main_queue(), ^{
-          [[[UIAlertView alloc] initWithTitle:@"Error"
-                                      message:@"Camera permission not found. Please, check your privacy settings."
-                                     delegate:self
-                            cancelButtonTitle:@"OK"
-                            otherButtonTitles:nil] show];
+          UIAlertController *alertController = [UIAlertController alertControllerWithTitle:@"Error"
+                                                                                   message:@"Camera permission not found. Please, check your privacy settings."
+                                                                            preferredStyle:UIAlertControllerStyleAlert];
+          [alertController addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+
+          UIViewController *topController = [self topViewController];
+          if (topController != nil) {
+            [topController presentViewController:alertController animated:YES completion:nil];
+          } else {
+            NSLog(@"Failed to present camera permission alert: no active view controller.");
+          }
       });
     }
   }];
@@ -716,11 +774,21 @@
 
 // Find a camera with the specified AVCaptureDevicePosition, returning nil if one is not found
 - (AVCaptureDevice *) cameraWithPosition:(AVCaptureDevicePosition) position {
-  NSArray *devices = [AVCaptureDevice devicesWithMediaType:AVMediaTypeVideo];
-  for (AVCaptureDevice *device in devices){
-    if ([device position] == position)
+  AVCaptureDeviceDiscoverySession *discoverySession =
+      [AVCaptureDeviceDiscoverySession discoverySessionWithDeviceTypes:@[AVCaptureDeviceTypeBuiltInWideAngleCamera]
+                                                              mediaType:AVMediaTypeVideo
+                                                               position:AVCaptureDevicePositionUnspecified];
+
+  for (AVCaptureDevice *device in discoverySession.devices) {
+    if ([device position] == position) {
       return device;
+    }
   }
+
+  if (discoverySession.devices.count > 0) {
+    return discoverySession.devices.firstObject;
+  }
+
   return nil;
 }
 

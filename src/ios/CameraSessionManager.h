@@ -1,5 +1,6 @@
 #import <CoreImage/CoreImage.h>
 #import <AVFoundation/AVFoundation.h>
+#import <UIKit/UIKit.h>
 #import "TemperatureAndTint.h"
 
 @protocol OnFocusDelegate
@@ -49,7 +50,7 @@
 @property (nonatomic) AVCaptureDeviceInput *videoDeviceInput;
 @property (nonatomic) AVCaptureStillImageOutput *stillImageOutput;
 @property (nonatomic) AVCaptureVideoDataOutput *dataOutput;
-@property (nonatomic, assign) id delegate;
+@property (nonatomic, weak) id<OnFocusDelegate> delegate;
 @property (nonatomic) NSString *currentWhiteBalanceMode;
 @property (nonatomic) NSDictionary *colorTemperatures;
 @end
