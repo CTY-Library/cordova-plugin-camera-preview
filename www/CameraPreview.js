@@ -6,31 +6,56 @@ var PLUGIN_NAME = "CameraPreview";
 
 var CameraPreview = function() {};
 
-function normalizeCaptureResult(result) {
-  if (Array.isArray(result)) {
-    return result.length > 0 ? result[0] : result;
+function extractFirstString(value, depth) {
+  if (depth > 4 || value === null || typeof value === 'undefined') {
+    return null;
   }
 
-  if (result && typeof result === 'object') {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    for (var i = 0; i < value.length; i++) {
+      var arrFound = extractFirstString(value[i], depth + 1);
+      if (typeof arrFound === 'string') {
+        return arrFound;
+      }
+    }
+    return null;
+  }
+
+  if (typeof value === 'object') {
     var preferredKeys = [
-      'filePath', 'path', 'data', 'uri', 'url', 'localURL', 'nativeURL', 'message'
+      'filePath', 'path', 'data', 'uri', 'url', 'localURL', 'nativeURL', 'message', 'value', 'result'
     ];
-    for (var i = 0; i < preferredKeys.length; i++) {
-      var key = preferredKeys[i];
-      if (typeof result[key] === 'string') {
-        return result[key];
+
+    for (var j = 0; j < preferredKeys.length; j++) {
+      var key = preferredKeys[j];
+      if (Object.prototype.hasOwnProperty.call(value, key)) {
+        var preferredFound = extractFirstString(value[key], depth + 1);
+        if (typeof preferredFound === 'string') {
+          return preferredFound;
+        }
       }
     }
 
-    if (typeof result[0] === 'string') {
-      return result[0];
+    var keys = Object.keys(value);
+    for (var k = 0; k < keys.length; k++) {
+      var genericFound = extractFirstString(value[keys[k]], depth + 1);
+      if (typeof genericFound === 'string') {
+        return genericFound;
+      }
     }
+  }
 
-    // Fallback: if the object only contains one string value, return it.
-    var keys = Object.keys(result);
-    if (keys.length === 1 && typeof result[keys[0]] === 'string') {
-      return result[keys[0]];
-    }
+  return null;
+}
+
+function normalizeCaptureResult(result) {
+  var found = extractFirstString(result, 0);
+  if (typeof found === 'string') {
+    return found;
   }
 
   return result;
