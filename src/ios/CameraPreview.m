@@ -1546,12 +1546,26 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
 
 - (void) capturePictureNow:(CGFloat) width withHeight:(CGFloat) height withQuality:(CGFloat) quality{
     AVCaptureConnection *connection = [self.sessionManager.stillImageOutput connectionWithMediaType:AVMediaTypeVideo];
+
+    if (connection == nil) {
+      NSLog(@"[CameraPreview][capturePictureNow] ERROR: no video connection available");
+      CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"No video connection available"];
+      [self.commandDelegate sendPluginResult:pluginResult callbackId:self.onPictureTakenHandlerId];
+      return;
+    }
+
     [self.sessionManager.stillImageOutput captureStillImageAsynchronouslyFromConnection:connection completionHandler:^(CMSampleBufferRef sampleBuffer, NSError *error) {
 
       NSLog(@"Done creating still image");
 
       if (error) {
-        NSLog(@"%@", error);
+        NSLog(@"[CameraPreview][capturePictureNow] capture error: %@", error);
+        CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[error localizedDescription]];
+        [self.commandDelegate sendPluginResult:pluginResult callbackId:self.onPictureTakenHandlerId];
+      } else if (sampleBuffer == NULL) {
+        NSLog(@"[CameraPreview][capturePictureNow] ERROR: sampleBuffer is nil");
+        CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Failed to capture image: empty buffer"];
+        [self.commandDelegate sendPluginResult:pluginResult callbackId:self.onPictureTakenHandlerId];
       } else {
 
         NSData *imageData = [AVCaptureStillImageOutput jpegStillImageNSDataRepresentation:sampleBuffer];
