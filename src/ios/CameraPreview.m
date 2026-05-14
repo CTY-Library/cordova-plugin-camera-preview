@@ -110,7 +110,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
     NSString *backgroundColor = command.arguments.count > 9 ? command.arguments[9] : nil;
     BOOL tapToFocus = (BOOL) [command.arguments[10] boolValue];
     BOOL disableExifHeaderStripping = (BOOL) [command.arguments[11] boolValue]; // ignore Android only
-    self.storeToFile = (BOOL) [command.arguments[12] boolValue];
+    self.shouldStoreToFile = (BOOL) [command.arguments[12] boolValue];
     BOOL enableAutoSettings = command.arguments.count > 13 ? (BOOL) [command.arguments[13] boolValue] : NO;
 
     // Create the session manager
@@ -1117,7 +1117,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
             UIImage *image = ((GLKView*)self.cameraRenderController.view).snapshot;
       CDVPluginResult *pluginResult = nil;
 
-      if (self.storeToFile) {
+      if (self.shouldStoreToFile) {
         NSData *data = UIImageJPEGRepresentation(image, (CGFloat) quality);
         NSString* filePath = [self getTempFilePath:@"jpg"];
         NSError *err;
@@ -1126,7 +1126,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
           pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_IO_EXCEPTION messageAsString:[err localizedDescription]];
         }
         else {
-          pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:[[NSURL fileURLWithPath:filePath] absoluteString]];
+          pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:filePath];
         }
       } else {
         NSString *base64Image = [self getBase64Image:image.CGImage withQuality:quality];
@@ -1303,7 +1303,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
   }
 
   BOOL store = [[command.arguments objectAtIndex:0] boolValue];
-  self.storeToFile = store;
+  self.shouldStoreToFile = store;
 
   pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
   [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
@@ -1535,7 +1535,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
         CGImageRelease(finalImage); // release CGImageRef to remove memory leaks
 
         CDVPluginResult *pluginResult;
-        if (self.storeToFile) {
+        if (self.shouldStoreToFile) {
           NSData *data = UIImageJPEGRepresentation([UIImage imageWithCGImage:resultFinalImage], (CGFloat) quality);
           NSString* filePath = [self getTempFilePath:@"jpg"];
           NSError *err;
@@ -1544,7 +1544,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
             pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_IO_EXCEPTION messageAsString:[err localizedDescription]];
           }
           else {
-            pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:[[NSURL fileURLWithPath:filePath] absoluteString]];
+            pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:filePath];
           }
         } else {
           NSMutableArray *params = [[NSMutableArray alloc] init];

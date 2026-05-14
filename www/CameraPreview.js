@@ -6,6 +6,26 @@ var PLUGIN_NAME = "CameraPreview";
 
 var CameraPreview = function() {};
 
+function normalizeCaptureResult(result) {
+  if (Array.isArray(result)) {
+    return result.length > 0 ? result[0] : result;
+  }
+
+  if (result && typeof result === 'object') {
+    if (typeof result.filePath === 'string') {
+      return result.filePath;
+    }
+    if (typeof result.path === 'string') {
+      return result.path;
+    }
+    if (typeof result.data === 'string') {
+      return result.data;
+    }
+  }
+
+  return result;
+}
+
 function isFunction(obj) {
   return !!(obj && obj.constructor && obj.call && obj.apply);
 };
@@ -102,7 +122,9 @@ CameraPreview.takeSnapshot = function(opts, onSuccess, onError) {
     opts.quality = 85;
   }
 
-  exec(onSuccess, onError, PLUGIN_NAME, "takeSnapshot", [opts.quality]);
+  exec(function(result) {
+    onSuccess(normalizeCaptureResult(result));
+  }, onError, PLUGIN_NAME, "takeSnapshot", [opts.quality]);
 };
 
 CameraPreview.takePicture = function(opts, onSuccess, onError) {
@@ -124,7 +146,9 @@ CameraPreview.takePicture = function(opts, onSuccess, onError) {
     opts.quality = 85;
   }
 
-  exec(onSuccess, onError, PLUGIN_NAME, "takePicture", [opts.width, opts.height, opts.quality]);
+  exec(function(result) {
+    onSuccess(normalizeCaptureResult(result));
+  }, onError, PLUGIN_NAME, "takePicture", [opts.width, opts.height, opts.quality]);
 };
 
 CameraPreview.setColorEffect = function(effect, onSuccess, onError) {
