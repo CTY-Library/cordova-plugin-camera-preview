@@ -1198,12 +1198,8 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
         NSString* filePath = [self getTempFilePath:@"jpg"];
         NSError *err;
 
-        if (![data writeToFile:filePath options:NSAtomicWrite error:&err]) {
-          pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_IO_EXCEPTION messageAsString:[err localizedDescription]];
-        }
-        else {
-          pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:filePath];
-        }
+        BOOL writeOK = [data writeToFile:filePath options:NSAtomicWrite error:&err];
+        pluginResult = [self pluginResultForStoredImageAtPath:filePath writeError:(writeOK ? nil : err)];
       } else {
         NSString *base64Image = [self getBase64Image:image.CGImage withQuality:quality];
         NSMutableArray *params = [[NSMutableArray alloc] init];
@@ -1602,12 +1598,8 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
     return [CDVPluginResult resultWithStatus:CDVCommandStatus_IO_EXCEPTION messageAsString:@"Image file not found after write"];
   }
 
-  NSString *fileUri = [[NSURL fileURLWithPath:filePath] absoluteString];
-  if (fileUri == nil || fileUri.length == 0) {
-    return [CDVPluginResult resultWithStatus:CDVCommandStatus_IO_EXCEPTION messageAsString:@"Failed to create file URI"];
-  }
-
-  return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:fileUri];
+  NSMutableArray *params = [[NSMutableArray alloc] initWithObjects:filePath, nil];
+  return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArray:params];
 }
 
 - (void) invokeTakePicture {
@@ -1709,8 +1701,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
 
           CDVPluginResult *pluginResult = [self pluginResultForStoredImageAtPath:filePath writeError:(writeOK ? nil : writeError)];
           if (writeOK) {
-            NSString *fileUri = [[NSURL fileURLWithPath:filePath] absoluteString];
-            NSLog(@"[CameraPreview][storeToFile] returning uri: %@", fileUri);
+            NSLog(@"[CameraPreview][storeToFile] returning path: %@", filePath);
           }
 
           [self sendPicturePluginResult:pluginResult callbackId:callbackId keepCallback:keepCallback];
@@ -1793,8 +1784,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
                 err != nil ? err.localizedDescription : @"none");
           pluginResult = [self pluginResultForStoredImageAtPath:filePath writeError:(writeOK ? nil : err)];
           if (writeOK) {
-            NSString *fileUri = [[NSURL fileURLWithPath:filePath] absoluteString];
-            NSLog(@"[CameraPreview][storeToFile] returning uri: %@", fileUri);
+            NSLog(@"[CameraPreview][storeToFile] returning path: %@", filePath);
           }
         } else {
           NSString *base64Image = [self getBase64Image:resultFinalImage withQuality:quality];

@@ -6,61 +6,6 @@ var PLUGIN_NAME = "CameraPreview";
 
 var CameraPreview = function() {};
 
-function extractFirstString(value, depth) {
-  if (depth > 4 || value === null || typeof value === 'undefined') {
-    return null;
-  }
-
-  if (typeof value === 'string') {
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    for (var i = 0; i < value.length; i++) {
-      var arrFound = extractFirstString(value[i], depth + 1);
-      if (typeof arrFound === 'string') {
-        return arrFound;
-      }
-    }
-    return null;
-  }
-
-  if (typeof value === 'object') {
-    var preferredKeys = [
-      'filePath', 'path', 'data', 'uri', 'url', 'localURL', 'nativeURL', 'message', 'value', 'result'
-    ];
-
-    for (var j = 0; j < preferredKeys.length; j++) {
-      var key = preferredKeys[j];
-      if (Object.prototype.hasOwnProperty.call(value, key)) {
-        var preferredFound = extractFirstString(value[key], depth + 1);
-        if (typeof preferredFound === 'string') {
-          return preferredFound;
-        }
-      }
-    }
-
-    var keys = Object.keys(value);
-    for (var k = 0; k < keys.length; k++) {
-      var genericFound = extractFirstString(value[keys[k]], depth + 1);
-      if (typeof genericFound === 'string') {
-        return genericFound;
-      }
-    }
-  }
-
-  return null;
-}
-
-function normalizeCaptureResult(result) {
-  var found = extractFirstString(result, 0);
-  if (typeof found === 'string') {
-    return found;
-  }
-
-  return result;
-}
-
 function isFunction(obj) {
   return !!(obj && obj.constructor && obj.call && obj.apply);
 };
@@ -157,9 +102,7 @@ CameraPreview.takeSnapshot = function(opts, onSuccess, onError) {
     opts.quality = 85;
   }
 
-  exec(function(result) {
-    onSuccess(normalizeCaptureResult(result));
-  }, onError, PLUGIN_NAME, "takeSnapshot", [opts.quality]);
+  exec(onSuccess, onError, PLUGIN_NAME, "takeSnapshot", [opts.quality]);
 };
 
 CameraPreview.takePicture = function(opts, onSuccess, onError) {
@@ -181,9 +124,7 @@ CameraPreview.takePicture = function(opts, onSuccess, onError) {
     opts.quality = 85;
   }
 
-  exec(function(result) {
-    onSuccess(normalizeCaptureResult(result));
-  }, onError, PLUGIN_NAME, "takePicture", [opts.width, opts.height, opts.quality]);
+  exec(onSuccess, onError, PLUGIN_NAME, "takePicture", [opts.width, opts.height, opts.quality]);
 };
 
 CameraPreview.setColorEffect = function(effect, onSuccess, onError) {

@@ -93,7 +93,7 @@ All options stated are optional and will default to values here
 * `tapFocus` - Defaults to false - Allows the user to tap to focus, when the view is in the foreground
 * `previewDrag` - Defaults to false - Does not work if toBack is set to false
 * `backgroundColor` - Defaults to '#000000' - Background color of the preview container (hex string, e.g. '#RRGGBB' or '#AARRGGBB', or 'transparent')
-* `storeToFile` - Defaults to false - Capture images to a file and return back the file path instead of returning base64 encoded data.
+* `storeToFile` - Defaults to false - Capture images to a file and return back the file path (inside the capture result array) instead of returning base64 encoded data.
 * `disableExifHeaderStripping` - Defaults to false - **Android Only** - Disable automatic rotation of the image, and let the browser deal with it (keep reading on how to achieve it)
 * `enableAutoSettings` - Defaults to false - When true, enables automatic camera settings during initialization (focus/exposure/white-balance and flash auto where supported)
 
@@ -171,28 +171,32 @@ CameraPreview.hide();
 
 <info>Take the picture. If width and height are not specified or are 0 it will use the defaults. If width and height are specified, it will choose a supported photo size that is closest to width and height specified and has closest aspect ratio to the preview. The argument `quality` defaults to `85` and specifies the quality/compression value: `0=max compression`, `100=max quality`.</info><br/>
 
+<info>Return format: the success callback receives an array with one element. Use `result[0]` to access the payload.</info><br/>
+
 ```javascript
-CameraPreview.takePicture({width:640, height:640, quality: 85}, function(base64PictureData|filePath) {
+CameraPreview.takePicture({width:640, height:640, quality: 85}, function(result) {
+  var payload = result[0];
   /*
-    if the storeToFile option is false (the default), then base64PictureData is returned.
-    base64PictureData is base64 encoded jpeg image. Use this data to store to a file or upload.
+    if the storeToFile option is false (the default), payload is base64 encoded jpeg image.
+    Use this data to store to a file or upload.
     Its up to the you to figure out the best way to save it to disk or whatever for your application.
   */
 
   /*
-    if the storeToFile option is set to true, then a filePath is returned. Note that the file
+    if the storeToFile option is set to true, payload is a filePath. Note that the file
     is stored in temporary storage, so you should move it to a permanent location if you
     don't want the OS to remove it arbitrarily.
   */
 
   // One simple example is if you are going to use it inside an HTML img src attribute then you would do the following:
-  imageSrcData = 'data:image/jpeg;base64,' + base64PictureData;
+  imageSrcData = 'data:image/jpeg;base64,' + payload;
   $('img#my-img').attr('src', imageSrcData);
 });
 
 // OR if you want to use the default options.
 
-CameraPreview.takePicture(function(base64PictureData){
+CameraPreview.takePicture(function(result){
+  var payload = result[0];
   /* code here */
 });
 ```
@@ -201,14 +205,18 @@ CameraPreview.takePicture(function(base64PictureData){
 
 <info>Take snapshot of the camera preview. The resulting image will be the same size as specified in `startCamera` options. The argument `quality` defaults to `85` and specifies the quality/compression value: `0=max compression`, `100=max quality`.</info><br/>
 
+<info>Return format: the success callback receives an array with one element. Use `result[0]` to access the payload.</info><br/>
+
 ```javascript
-CameraPreview.takeSnapshot({quality: 85}, function(base64PictureData){
+CameraPreview.takeSnapshot({quality: 85}, function(result){
+  var payload = result[0];
   /*
-    base64PictureData is base64 encoded jpeg image. Use this data to store to a file or upload.
+    payload is base64 encoded jpeg image by default.
+    If storeToFile is enabled, payload is the file path.
   */
 
   // One simple example is if you are going to use it inside an HTML img src attribute then you would do the following:
-  imageSrcData = 'data:image/jpeg;base64,' +base64PictureData;
+  imageSrcData = 'data:image/jpeg;base64,' + payload;
   $('img#my-img').attr('src', imageSrcData);
 });
 ```
@@ -446,7 +454,7 @@ CameraPreview.setCaptureRatio('4:3', function(){
 
 ### setStoreToFile(storeToFile, [successCallback, errorCallback])
 
-<info>When `true`, subsequent `takePicture` calls will store the captured image to a temporary file and return its file path. When `false`, `takePicture` returns a base64 JPEG string. This mirrors the `storeToFile` option available on `startCamera` but can be changed at runtime.</info><br/>
+<info>When `true`, subsequent `takePicture` (and `takeSnapshot`) calls will store the captured image to a temporary file and return its file path in the first array item (`result[0]`). When `false`, the first array item is a base64 JPEG string. This mirrors the `storeToFile` option available on `startCamera` but can be changed at runtime.</info><br/>
 
 ```javascript
 // Switch to storing captured images to a file
@@ -582,7 +590,8 @@ function displayImage(content) {
 }
 
 function takePicture() {
-  CameraPreview.takePicture({width: app.dimension.width, height: app.dimension.height}, function(data){
+  CameraPreview.takePicture({width: app.dimension.width, height: app.dimension.height}, function(result){
+    var data = result[0];
     if (cordova.platformId === 'android') {
       CameraPreview.getBlob('file://' + data, function(image) {
         displayImage(image);
