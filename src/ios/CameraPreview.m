@@ -1161,6 +1161,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
 
 - (void) takePicture:(CDVInvokedUrlCommand*)command {
   NSLog(@"takePicture");
+  NSLog(@"[CameraPreview][takePicture] callbackId=%@ argsCount=%lu", command.callbackId, (unsigned long)command.arguments.count);
   CDVPluginResult *pluginResult;
 
   if (self.cameraRenderController != NULL) {
@@ -1176,7 +1177,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
     CGFloat height = (CGFloat)[command.arguments[1] floatValue];
     CGFloat quality = (CGFloat)[command.arguments[2] floatValue] / 100.0f;
 
-    [self invokeTakePicture:width withHeight:height withQuality:quality];
+    [self invokeTakePicture:width withHeight:height withQuality:quality callbackId:command.callbackId];
   } else {
     pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Camera not started"];
     [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
@@ -1478,25 +1479,19 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
   [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 }
 
-- (double)radiansFromUIImageOrientation:(UIImageOrientation)orientation {
-  double radians;
-
-  switch ([[UIApplication sharedApplication] statusBarOrientation]) {
-    case UIDeviceOrientationPortrait:
-      radians = M_PI_2;
-      break;
-    case UIDeviceOrientationLandscapeLeft:
-      radians = 0.f;
-      break;
-    case UIDeviceOrientationLandscapeRight:
-      radians = M_PI;
-      break;
-    case UIDeviceOrientationPortraitUpsideDown:
-      radians = -M_PI_2;
-      break;
+- (double)radiansFromVideoOrientation:(AVCaptureVideoOrientation)videoOrientation {
+  switch (videoOrientation) {
+    case AVCaptureVideoOrientationPortrait:
+      return M_PI_2;
+    case AVCaptureVideoOrientationLandscapeLeft:
+      return 0.f;
+    case AVCaptureVideoOrientationLandscapeRight:
+      return M_PI;
+    case AVCaptureVideoOrientationPortraitUpsideDown:
+      return -M_PI_2;
+    default:
+      return 0.f;
   }
-
-  return radians;
 }
 
 -(CGImageRef) CGImageRotated:(CGImageRef) originalCGImage withRadians:(double) radians {
@@ -1541,8 +1536,53 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
   [self.sessionManager tapToFocus:point.x yPoint:point.y];
 }
 
+- (void)sendPicturePluginResult:(CDVPluginResult *)pluginResult callbackId:(NSString *)callbackId keepCallback:(BOOL)keep {
+  if (callbackId == nil || callbackId.length == 0) {
+    NSLog(@"[CameraPreview] skip plugin result: callbackId is nil/empty");
+    return;
+  }
+
+  CDVPluginResult *result = pluginResult;
+  if (result == nil) {
+    result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Failed to process captured image"];
+  }
+
+  [result setKeepCallbackAsBool:keep];
+  NSLog(@"[CameraPreview][sendPicturePluginResult] callbackId=%@ keep=%@",
+        callbackId,
+        keep ? @"YES" : @"NO");
+  [self.commandDelegate sendPluginResult:result callbackId:callbackId];
+  NSLog(@"[CameraPreview][sendPicturePluginResult] callback sent for callbackId=%@", callbackId);
+}
+
+- (CDVPluginResult *)pluginResultForStoredImageAtPath:(NSString *)filePath writeError:(NSError *)writeError {
+  if (writeError != nil) {
+    return [CDVPluginResult resultWithStatus:CDVCommandStatus_IO_EXCEPTION messageAsString:[writeError localizedDescription]];
+  }
+
+  if (filePath == nil || filePath.length == 0) {
+    return [CDVPluginResult resultWithStatus:CDVCommandStatus_IO_EXCEPTION messageAsString:@"Invalid image file path"];
+  }
+
+  BOOL fileExists = [[NSFileManager defaultManager] fileExistsAtPath:filePath];
+  if (!fileExists) {
+    return [CDVPluginResult resultWithStatus:CDVCommandStatus_IO_EXCEPTION messageAsString:@"Image file not found after write"];
+  }
+
+  NSString *fileUri = [[NSURL fileURLWithPath:filePath] absoluteString];
+  if (fileUri == nil || fileUri.length == 0) {
+    return [CDVPluginResult resultWithStatus:CDVCommandStatus_IO_EXCEPTION messageAsString:@"Failed to create file URI"];
+  }
+
+  return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:fileUri];
+}
+
 - (void) invokeTakePicture {
-  [self invokeTakePicture:0.0 withHeight:0.0 withQuality:0.85];
+  [self invokeTakePicture:0.0 withHeight:0.0 withQuality:0.85 callbackId:self.onPictureTakenHandlerId];
+}
+
+- (void) invokeTakePicture:(CGFloat) width withHeight:(CGFloat) height withQuality:(CGFloat) quality {
+  [self invokeTakePicture:width withHeight:height withQuality:quality callbackId:self.onPictureTakenHandlerId];
 }
 
 - (void) invokeTakePictureOnFocus {
@@ -1550,109 +1590,206 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
   [self.sessionManager takePictureOnFocus];
 }
 
-- (void) capturePictureNow:(CGFloat) width withHeight:(CGFloat) height withQuality:(CGFloat) quality{
+- (void) capturePictureNow:(CGFloat) width withHeight:(CGFloat) height withQuality:(CGFloat) quality callbackId:(NSString *)callbackId {
+    if (callbackId == nil || callbackId.length == 0) {
+      NSLog(@"[CameraPreview][capturePictureNow] ERROR: callbackId is nil/empty, abort capture");
+      return;
+    }
+
     AVCaptureConnection *connection = [self.sessionManager.stillImageOutput connectionWithMediaType:AVMediaTypeVideo];
 
     if (connection == nil) {
       NSLog(@"[CameraPreview][capturePictureNow] ERROR: no video connection available");
       CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"No video connection available"];
-      [self.commandDelegate sendPluginResult:pluginResult callbackId:self.onPictureTakenHandlerId];
+      [self sendPicturePluginResult:pluginResult callbackId:callbackId keepCallback:self.cameraRenderController.tapToTakePicture];
       return;
     }
+
+    // Capture the CIContext and settings we need on this thread before going async,
+    // so the block doesn't access UIKit/view properties from a background thread.
+    CIContext *ciContext = self.cameraRenderController.ciContext;
+    AVCaptureDevicePosition cameraPosition = self.sessionManager.defaultCamera;
+    AVCaptureVideoOrientation videoOrientation = connection.videoOrientation;
+    CIFilter *ciFilter = self.sessionManager.ciFilter;
+    BOOL storeToFile = self.shouldStoreToFile;
+    BOOL keepCallback = NO;
+        BOOL needsResize = (width > 0 && height > 0);
+        BOOL needsFilter = (ciFilter != nil);
+        BOOL requiresHeavyProcessing = needsResize || needsFilter;
+
+        NSLog(@"[CameraPreview][capturePictureNow] begin callbackId=%@ storeToFile=%@ needsResize=%@ needsFilter=%@",
+          callbackId,
+          storeToFile ? @"YES" : @"NO",
+          needsResize ? @"YES" : @"NO",
+          needsFilter ? @"YES" : @"NO");
 
     [self.sessionManager.stillImageOutput captureStillImageAsynchronouslyFromConnection:connection completionHandler:^(CMSampleBufferRef sampleBuffer, NSError *error) {
 
       NSLog(@"Done creating still image");
 
-      if (error) {
-        NSLog(@"[CameraPreview][capturePictureNow] capture error: %@", error);
-        CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[error localizedDescription]];
-        [self.commandDelegate sendPluginResult:pluginResult callbackId:self.onPictureTakenHandlerId];
-      } else if (sampleBuffer == NULL) {
-        NSLog(@"[CameraPreview][capturePictureNow] ERROR: sampleBuffer is nil");
-        CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Failed to capture image: empty buffer"];
-        [self.commandDelegate sendPluginResult:pluginResult callbackId:self.onPictureTakenHandlerId];
-      } else {
+      // --- Move ALL heavy processing off the main thread so WKWebView URL
+      //     scheme tasks are not starved while the main run loop is blocked. ---
+      dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+
+        CGImageRef finalImage = nil;
+        CGImageRef resultFinalImage = nil;
+        @try {
+
+        if (error) {
+          NSLog(@"[CameraPreview][capturePictureNow] capture error: %@", error);
+          CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[error localizedDescription]];
+          [self sendPicturePluginResult:pluginResult callbackId:callbackId keepCallback:keepCallback];
+          return;
+        }
+
+        if (sampleBuffer == NULL) {
+          NSLog(@"[CameraPreview][capturePictureNow] ERROR: sampleBuffer is nil");
+          CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Failed to capture image: empty buffer"];
+          [self sendPicturePluginResult:pluginResult callbackId:callbackId keepCallback:keepCallback];
+          return;
+        }
 
         NSData *imageData = [AVCaptureStillImageOutput jpegStillImageNSDataRepresentation:sampleBuffer];
-        UIImage *capturedImage  = [[UIImage alloc] initWithData:imageData];
+        if (imageData == nil) {
+          NSLog(@"[CameraPreview][capturePictureNow] ERROR: imageData is nil");
+          CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Failed to encode captured image data"];
+          [self sendPicturePluginResult:pluginResult callbackId:callbackId keepCallback:keepCallback];
+          return;
+        }
+
+        if (storeToFile && !requiresHeavyProcessing) {
+          NSLog(@"[CameraPreview][storeToFile] fast path enabled (no resize/filter)");
+          NSString *filePath = [self getTempFilePath:@"jpg"];
+          NSLog(@"[CameraPreview][storeToFile] writing file: %@", filePath);
+
+          NSError *writeError = nil;
+          BOOL writeOK = [imageData writeToFile:filePath options:NSAtomicWrite error:&writeError];
+          NSLog(@"[CameraPreview][storeToFile] write result=%@ error=%@",
+                writeOK ? @"OK" : @"FAIL",
+                writeError != nil ? writeError.localizedDescription : @"none");
+
+          CDVPluginResult *pluginResult = [self pluginResultForStoredImageAtPath:filePath writeError:(writeOK ? nil : writeError)];
+          if (writeOK) {
+            NSString *fileUri = [[NSURL fileURLWithPath:filePath] absoluteString];
+            NSLog(@"[CameraPreview][storeToFile] returning uri: %@", fileUri);
+          }
+
+          [self sendPicturePluginResult:pluginResult callbackId:callbackId keepCallback:keepCallback];
+          return;
+        }
+
+        if (storeToFile) {
+          NSLog(@"[CameraPreview][storeToFile] heavy path enabled (resize/filter requested)");
+        }
+
+        UIImage *capturedImage = [[UIImage alloc] initWithData:imageData];
+
+        if (capturedImage == nil || capturedImage.CGImage == nil) {
+          CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Failed to decode captured image"];
+          [self sendPicturePluginResult:pluginResult callbackId:callbackId keepCallback:keepCallback];
+          return;
+        }
 
         CIImage *capturedCImage;
-        //image resize
-
-        if(width > 0 && height > 0){
-          CGFloat scaleHeight = width/capturedImage.size.height;
-          CGFloat scaleWidth = height/capturedImage.size.width;
+        if (width > 0 && height > 0) {
+          CGFloat scaleHeight = width / capturedImage.size.height;
+          CGFloat scaleWidth  = height / capturedImage.size.width;
           CGFloat scale = scaleHeight > scaleWidth ? scaleWidth : scaleHeight;
 
           CIFilter *resizeFilter = [CIFilter filterWithName:@"CILanczosScaleTransform"];
           [resizeFilter setValue:[[CIImage alloc] initWithCGImage:[capturedImage CGImage]] forKey:kCIInputImageKey];
-          [resizeFilter setValue:[NSNumber numberWithFloat:1.0f] forKey:@"inputAspectRatio"];
-          [resizeFilter setValue:[NSNumber numberWithFloat:scale] forKey:@"inputScale"];
+          [resizeFilter setValue:@(1.0f) forKey:@"inputAspectRatio"];
+          [resizeFilter setValue:@(scale) forKey:@"inputScale"];
           capturedCImage = [resizeFilter outputImage];
-        }else{
+        } else {
           capturedCImage = [[CIImage alloc] initWithCGImage:[capturedImage CGImage]];
         }
 
         CIImage *imageToFilter;
-        CIImage *finalCImage;
-
-        //fix front mirroring
-        if (self.sessionManager.defaultCamera == AVCaptureDevicePositionFront) {
+        if (cameraPosition == AVCaptureDevicePositionFront) {
           CGAffineTransform matrix = CGAffineTransformTranslate(CGAffineTransformMakeScale(1, -1), 0, capturedCImage.extent.size.height);
           imageToFilter = [capturedCImage imageByApplyingTransform:matrix];
         } else {
           imageToFilter = capturedCImage;
         }
 
-        CIFilter *filter = [self.sessionManager ciFilter];
-        if (filter != nil) {
+        CIImage *finalCImage;
+        if (ciFilter != nil) {
           [self.sessionManager.filterLock lock];
-          [filter setValue:imageToFilter forKey:kCIInputImageKey];
-          finalCImage = [filter outputImage];
+          [ciFilter setValue:imageToFilter forKey:kCIInputImageKey];
+          finalCImage = [ciFilter outputImage];
           [self.sessionManager.filterLock unlock];
         } else {
           finalCImage = imageToFilter;
         }
 
-        CGImageRef finalImage = [self.cameraRenderController.ciContext createCGImage:finalCImage fromRect:finalCImage.extent];
-        UIImage *resultImage = [UIImage imageWithCGImage:finalImage];
-
-        double radians = [self radiansFromUIImageOrientation:resultImage.imageOrientation];
-        CGImageRef resultFinalImage = [self CGImageRotated:finalImage withRadians:radians];
-
-        CGImageRelease(finalImage); // release CGImageRef to remove memory leaks
-
-        CDVPluginResult *pluginResult;
-        if (self.shouldStoreToFile) {
-          NSData *data = UIImageJPEGRepresentation([UIImage imageWithCGImage:resultFinalImage], (CGFloat) quality);
-          NSString* filePath = [self getTempFilePath:@"jpg"];
-          NSError *err;
-
-          if (![data writeToFile:filePath options:NSAtomicWrite error:&err]) {
-            pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_IO_EXCEPTION messageAsString:[err localizedDescription]];
-          }
-          else {
-            pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:filePath];
-          }
-        } else {
-          NSMutableArray *params = [[NSMutableArray alloc] init];
-          NSString *base64Image = [self getBase64Image:resultFinalImage withQuality:quality];
-          [params addObject:base64Image];
-          pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArray:params];
+        // Use a CPU-backed CIContext so this can safely run off the main thread
+        // without contending with the EAGLContext used for preview rendering.
+        CIContext *renderContext = ciContext;
+        if (renderContext == nil) {
+          renderContext = [CIContext contextWithOptions:nil];
+        }
+        finalImage = [renderContext createCGImage:finalCImage fromRect:finalCImage.extent];
+        if (finalImage == nil) {
+          CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Failed to render captured image"];
+          [self sendPicturePluginResult:pluginResult callbackId:callbackId keepCallback:keepCallback];
+          return;
         }
 
-        CGImageRelease(resultFinalImage); // release CGImageRef to remove memory leaks
+        double radians = [self radiansFromVideoOrientation:videoOrientation];
+        resultFinalImage = [self CGImageRotated:finalImage withRadians:radians];
+        CGImageRelease(finalImage);
+        finalImage = nil;
 
-        [pluginResult setKeepCallbackAsBool:self.cameraRenderController.tapToTakePicture];
-        [self.commandDelegate sendPluginResult:pluginResult callbackId:self.onPictureTakenHandlerId];
-      }
+        CDVPluginResult *pluginResult;
+        if (storeToFile) {
+          NSLog(@"[CameraPreview][storeToFile] heavy path writing processed image");
+          NSData *data = UIImageJPEGRepresentation([UIImage imageWithCGImage:resultFinalImage], (CGFloat)quality);
+          NSString *filePath = [self getTempFilePath:@"jpg"];
+          NSLog(@"[CameraPreview][storeToFile] writing file: %@", filePath);
+          NSError *err;
+          BOOL writeOK = (data != nil) && [data writeToFile:filePath options:NSAtomicWrite error:&err];
+          NSLog(@"[CameraPreview][storeToFile] write result=%@ error=%@",
+                writeOK ? @"OK" : @"FAIL",
+                err != nil ? err.localizedDescription : @"none");
+          pluginResult = [self pluginResultForStoredImageAtPath:filePath writeError:(writeOK ? nil : err)];
+          if (writeOK) {
+            NSString *fileUri = [[NSURL fileURLWithPath:filePath] absoluteString];
+            NSLog(@"[CameraPreview][storeToFile] returning uri: %@", fileUri);
+          }
+        } else {
+          NSString *base64Image = [self getBase64Image:resultFinalImage withQuality:quality];
+          if (base64Image == nil) {
+            pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Failed to encode image"];
+          } else {
+            NSMutableArray *params = [[NSMutableArray alloc] init];
+            [params addObject:base64Image];
+            pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArray:params];
+          }
+        }
+
+        [self sendPicturePluginResult:pluginResult callbackId:callbackId keepCallback:keepCallback];
+        }
+        @catch (NSException *exception) {
+          NSLog(@"[CameraPreview][capturePictureNow] exception: %@", exception.reason);
+          CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Failed to process captured image"];
+          [self sendPicturePluginResult:pluginResult callbackId:callbackId keepCallback:keepCallback];
+        }
+        @finally {
+          if (finalImage != nil) {
+            CGImageRelease(finalImage);
+          }
+          if (resultFinalImage != nil) {
+            CGImageRelease(resultFinalImage);
+          }
+        }
+      });
     }];
 }
 
-- (void) invokeTakePicture:(CGFloat) width withHeight:(CGFloat) height withQuality:(CGFloat) quality{
+- (void) invokeTakePicture:(CGFloat) width withHeight:(CGFloat) height withQuality:(CGFloat) quality callbackId:(NSString *)callbackId {
   if (self.captureTimerSeconds <= 0.0) {
-    [self capturePictureNow:width withHeight:height withQuality:quality];
+    [self capturePictureNow:width withHeight:height withQuality:quality callbackId:callbackId];
     return;
   }
 
@@ -1660,13 +1797,13 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(self.captureTimerSeconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
     __strong typeof(weakSelf) strongSelf = weakSelf;
     if (strongSelf == nil || strongSelf.sessionManager == nil || strongSelf.cameraRenderController == nil) {
-      if (strongSelf != nil && strongSelf.onPictureTakenHandlerId != nil) {
+      if (strongSelf != nil && callbackId != nil) {
         CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Camera not started"];
-        [strongSelf.commandDelegate sendPluginResult:pluginResult callbackId:strongSelf.onPictureTakenHandlerId];
+        [strongSelf sendPicturePluginResult:pluginResult callbackId:callbackId keepCallback:NO];
       }
       return;
     }
-    [strongSelf capturePictureNow:width withHeight:height withQuality:quality];
+    [strongSelf capturePictureNow:width withHeight:height withQuality:quality callbackId:callbackId];
   });
 }
 

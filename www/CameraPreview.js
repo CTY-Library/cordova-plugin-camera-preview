@@ -12,14 +12,24 @@ function normalizeCaptureResult(result) {
   }
 
   if (result && typeof result === 'object') {
-    if (typeof result.filePath === 'string') {
-      return result.filePath;
+    var preferredKeys = [
+      'filePath', 'path', 'data', 'uri', 'url', 'localURL', 'nativeURL', 'message'
+    ];
+    for (var i = 0; i < preferredKeys.length; i++) {
+      var key = preferredKeys[i];
+      if (typeof result[key] === 'string') {
+        return result[key];
+      }
     }
-    if (typeof result.path === 'string') {
-      return result.path;
+
+    if (typeof result[0] === 'string') {
+      return result[0];
     }
-    if (typeof result.data === 'string') {
-      return result.data;
+
+    // Fallback: if the object only contains one string value, return it.
+    var keys = Object.keys(result);
+    if (keys.length === 1 && typeof result[keys[0]] === 'string') {
+      return result[keys[0]];
     }
   }
 
