@@ -1555,6 +1555,39 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
   NSLog(@"[CameraPreview][sendPicturePluginResult] callback sent for callbackId=%@", callbackId);
 }
 
+- (NSData *)jpegDataFromSampleBuffer:(CMSampleBufferRef)sampleBuffer quality:(CGFloat)quality {
+  if (sampleBuffer == NULL) {
+    return nil;
+  }
+
+  NSData *imageData = [AVCaptureStillImageOutput jpegStillImageNSDataRepresentation:sampleBuffer];
+  if (imageData != nil && imageData.length > 0) {
+    return imageData;
+  }
+
+  CVImageBufferRef imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer);
+  if (imageBuffer == NULL) {
+    return nil;
+  }
+
+  CIImage *ciImage = [CIImage imageWithCVPixelBuffer:imageBuffer];
+  CIContext *context = [CIContext contextWithOptions:nil];
+  CGImageRef cgImage = [context createCGImage:ciImage fromRect:ciImage.extent];
+  if (cgImage == nil) {
+    return nil;
+  }
+
+  UIImage *image = [UIImage imageWithCGImage:cgImage];
+  CGImageRelease(cgImage);
+
+  CGFloat clampedQuality = quality;
+  if (clampedQuality <= 0.0f || clampedQuality > 1.0f) {
+    clampedQuality = 0.85f;
+  }
+
+  return UIImageJPEGRepresentation(image, clampedQuality);
+}
+
 - (CDVPluginResult *)pluginResultForStoredImageAtPath:(NSString *)filePath writeError:(NSError *)writeError {
   if (writeError != nil) {
     return [CDVPluginResult resultWithStatus:CDVCommandStatus_IO_EXCEPTION messageAsString:[writeError localizedDescription]];
@@ -1627,6 +1660,12 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
 
       NSLog(@"Done creating still image");
 
+      // Keep sampleBuffer alive while we process on a background queue.
+      CMSampleBufferRef retainedSampleBuffer = sampleBuffer;
+      if (retainedSampleBuffer != NULL) {
+        CFRetain(retainedSampleBuffer);
+      }
+
       // --- Move ALL heavy processing off the main thread so WKWebView URL
       //     scheme tasks are not starved while the main run loop is blocked. ---
       dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
@@ -1642,14 +1681,14 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
           return;
         }
 
-        if (sampleBuffer == NULL) {
+        if (retainedSampleBuffer == NULL) {
           NSLog(@"[CameraPreview][capturePictureNow] ERROR: sampleBuffer is nil");
           CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Failed to capture image: empty buffer"];
           [self sendPicturePluginResult:pluginResult callbackId:callbackId keepCallback:keepCallback];
           return;
         }
 
-        NSData *imageData = [AVCaptureStillImageOutput jpegStillImageNSDataRepresentation:sampleBuffer];
+        NSData *imageData = [self jpegDataFromSampleBuffer:retainedSampleBuffer quality:quality];
         if (imageData == nil) {
           NSLog(@"[CameraPreview][capturePictureNow] ERROR: imageData is nil");
           CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Failed to encode captured image data"];
@@ -1776,6 +1815,9 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
           [self sendPicturePluginResult:pluginResult callbackId:callbackId keepCallback:keepCallback];
         }
         @finally {
+          if (retainedSampleBuffer != NULL) {
+            CFRelease(retainedSampleBuffer);
+          }
           if (finalImage != nil) {
             CGImageRelease(finalImage);
           }
