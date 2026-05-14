@@ -76,6 +76,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
 @property (nonatomic, strong) UIView *settingsDimView;
 @property (nonatomic, strong) UIView *settingsCardView;
 @property (nonatomic, strong) UIView *previewBackgroundView;
+@property (nonatomic, assign) BOOL pendingResumeWhenActive;
 
 @end
 
@@ -85,6 +86,83 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
   // start as transparent
   self.webView.opaque = NO;
   self.webView.backgroundColor = [UIColor clearColor];
+  self.pendingResumeWhenActive = NO;
+
+  [[NSNotificationCenter defaultCenter] addObserver:self
+                                           selector:@selector(onApplicationDidBecomeActive:)
+                                               name:UIApplicationDidBecomeActiveNotification
+                                             object:nil];
+}
+
+- (void)dealloc {
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+- (BOOL)isApplicationActive {
+  if (@available(iOS 13.0, *)) {
+    NSSet<UIScene *> *connectedScenes = [UIApplication sharedApplication].connectedScenes;
+    for (UIScene *scene in connectedScenes) {
+      if ([scene isKindOfClass:[UIWindowScene class]] && scene.activationState == UISceneActivationStateForegroundActive) {
+        return YES;
+      }
+    }
+    return NO;
+  }
+
+  return [UIApplication sharedApplication].applicationState == UIApplicationStateActive;
+}
+
+- (void)startCaptureSessionIfAllowed:(NSString *)source {
+  if (self.sessionManager == nil || self.sessionManager.session == nil) {
+    NSLog(@"[CameraPreview][%@] skip start: session is nil", source);
+    return;
+  }
+
+  if (![self isApplicationActive]) {
+    self.pendingResumeWhenActive = YES;
+    NSLog(@"[CameraPreview][%@] defer start: app/scene is not foreground active", source);
+    return;
+  }
+
+  self.pendingResumeWhenActive = NO;
+  dispatch_async(self.sessionManager.sessionQueue, ^{
+    if (!self.sessionManager.session.isRunning) {
+      NSLog(@"[CameraPreview][%@] startRunning", source);
+      [self.sessionManager.session startRunning];
+    } else {
+      NSLog(@"[CameraPreview][%@] start skipped: already running", source);
+    }
+  });
+}
+
+- (void)stopCaptureSession:(NSString *)source {
+  if (self.sessionManager == nil || self.sessionManager.session == nil) {
+    NSLog(@"[CameraPreview][%@] skip stop: session is nil", source);
+    return;
+  }
+
+  dispatch_async(self.sessionManager.sessionQueue, ^{
+    if (self.sessionManager.session.isRunning) {
+      NSLog(@"[CameraPreview][%@] stopRunning", source);
+      [self.sessionManager.session stopRunning];
+    } else {
+      NSLog(@"[CameraPreview][%@] stop skipped: already stopped", source);
+    }
+  });
+}
+
+- (void)onApplicationDidBecomeActive:(NSNotification *)notification {
+  if (!self.pendingResumeWhenActive) {
+    return;
+  }
+
+  if (self.cameraRenderController == nil || self.cameraRenderController.view.hidden) {
+    NSLog(@"[CameraPreview][didBecomeActive] pending resume canceled: camera hidden or not ready");
+    self.pendingResumeWhenActive = NO;
+    return;
+  }
+
+  [self startCaptureSessionIfAllowed:@"didBecomeActive"];
 }
 
 - (void) startCamera:(CDVInvokedUrlCommand*)command {
@@ -659,6 +737,8 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
     CDVPluginResult *pluginResult;
 
     if(self.sessionManager != nil) {
+      self.pendingResumeWhenActive = NO;
+      [self stopCaptureSession:@"stopCamera"];
       [self dismissSettingsPanel];
         [self.settingsButton removeFromSuperview];
         self.settingsButton = nil;
@@ -688,14 +768,9 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
   CDVPluginResult *pluginResult;
 
   if (self.cameraRenderController != nil) {
+    self.pendingResumeWhenActive = NO;
     [self.cameraRenderController.view setHidden:YES];
-    // stop the capture session to release camera resources while hidden
-    if (self.sessionManager != nil && self.sessionManager.session != nil) {
-      dispatch_async(self.sessionManager.sessionQueue, ^{
-        NSLog(@"Stopping session (hide)");
-        [self.sessionManager.session stopRunning];
-      });
-    }
+    [self stopCaptureSession:@"hideCamera"];
     pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
   } else {
     pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Camera not started"];
@@ -710,13 +785,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
 
   if (self.cameraRenderController != nil) {
     [self.cameraRenderController.view setHidden:NO];
-    // restart the capture session when showing
-    if (self.sessionManager != nil && self.sessionManager.session != nil) {
-      dispatch_async(self.sessionManager.sessionQueue, ^{
-        NSLog(@"Starting session (show)");
-        [self.sessionManager.session startRunning];
-      });
-    }
+    [self startCaptureSessionIfAllowed:@"showCamera"];
     pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
   } else {
     pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Camera not started"];

@@ -85,10 +85,15 @@
                                                name:UIApplicationWillEnterForegroundNotification
                                              object:nil];
 
+  // Only start the session if we're not already running
   dispatch_async(self.sessionManager.sessionQueue, ^{
-      NSLog(@"Starting session");
-      [self.sessionManager.session startRunning];
-      });
+      if (!self.sessionManager.session.isRunning) {
+        NSLog(@"[CameraRenderController] viewWillAppear: startRunning");
+        [self.sessionManager.session startRunning];
+      } else {
+        NSLog(@"[CameraRenderController] viewWillAppear: already running, skipped");
+      }
+  });
 }
 
 - (void) viewWillDisappear:(BOOL)animated {
@@ -145,15 +150,16 @@
 
 - (void) appplicationIsActive:(NSNotification *)notification {
   dispatch_async(self.sessionManager.sessionQueue, ^{
-      NSLog(@"Starting session");
+      NSLog(@"[CameraRenderController] DidBecomeActive: startRunning");
       [self.sessionManager.session startRunning];
       });
 }
 
 - (void) applicationEnteredForeground:(NSNotification *)notification {
+  // App is about to enter foreground — start the session (was incorrectly stopping before)
   dispatch_async(self.sessionManager.sessionQueue, ^{
-      NSLog(@"Stopping session");
-      [self.sessionManager.session stopRunning];
+      NSLog(@"[CameraRenderController] WillEnterForeground: startRunning");
+      [self.sessionManager.session startRunning];
       });
 }
 
