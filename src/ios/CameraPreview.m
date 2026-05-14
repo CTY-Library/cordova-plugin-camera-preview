@@ -1101,10 +1101,25 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
         CGFloat quality = (CGFloat)[command.arguments[0] floatValue] / 100.0f;
         dispatch_async(self.sessionManager.sessionQueue, ^{
             UIImage *image = ((GLKView*)self.cameraRenderController.view).snapshot;
-            NSString *base64Image = [self getBase64Image:image.CGImage withQuality:quality];
-            NSMutableArray *params = [[NSMutableArray alloc] init];
-            [params addObject:base64Image];
-            CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArray:params];
+      CDVPluginResult *pluginResult = nil;
+
+      if (self.storeToFile) {
+        NSData *data = UIImageJPEGRepresentation(image, (CGFloat) quality);
+        NSString* filePath = [self getTempFilePath:@"jpg"];
+        NSError *err;
+
+        if (![data writeToFile:filePath options:NSAtomicWrite error:&err]) {
+          pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_IO_EXCEPTION messageAsString:[err localizedDescription]];
+        }
+        else {
+          pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:[[NSURL fileURLWithPath:filePath] absoluteString]];
+        }
+      } else {
+        NSString *base64Image = [self getBase64Image:image.CGImage withQuality:quality];
+        NSMutableArray *params = [[NSMutableArray alloc] init];
+        [params addObject:base64Image];
+        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArray:params];
+      }
             [pluginResult setKeepCallbackAsBool:false];
             [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
         });
