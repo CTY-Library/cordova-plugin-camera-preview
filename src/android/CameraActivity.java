@@ -374,8 +374,40 @@ public class CameraActivity extends Fragment {
   @Override
   public void onResume() {
     super.onResume();
+    resumeCamera();
+  }
+
+  @Override
+  public void onPause() {
+    super.onPause();
+    pauseCamera();
+  }
+
+  public void pauseCamera() {
+    // Because the Camera object is a shared resource, it's very important to release it when paused.
+    try {
+      if (mCamera != null) {
+        setDefaultCameraId();
+        mPreview.setCamera(null, -1);
+        mCamera.setPreviewCallback(null);
+        mCamera.release();
+        mCamera = null;
+      }
+    } catch (Exception e) {
+      Log.w(TAG, "pauseCamera failed", e);
+    }
 
     try {
+      Activity activity = getActivity();
+      muteStream(false, activity);
+    } catch (Exception e) {
+      // ignore
+    }
+  }
+
+  public void resumeCamera() {
+    try {
+      setDefaultCameraId();
       mCamera = Camera.open(defaultCameraId);
 
       if (cameraParameters != null) {
@@ -388,8 +420,6 @@ public class CameraActivity extends Fragment {
         mPreview.setCamera(mCamera, cameraCurrentlyLocked);
         applyAutoSettingsIfNeeded();
 
-        // Don't immediately call the callback - post it as a delayed action
-        // to ensure the listener is properly set up when it's called
         if (eventListener != null) {
           new Handler().post(new Runnable() {
             @Override
@@ -426,25 +456,8 @@ public class CameraActivity extends Fragment {
         });
       }
     } catch (Exception e) {
-      Log.e(TAG, "Error in onResume", e);
+      Log.e(TAG, "Error in resumeCamera", e);
     }
-  }
-
-  @Override
-  public void onPause() {
-    super.onPause();
-
-    // Because the Camera object is a shared resource, it's very important to release it when the activity is paused.
-    if (mCamera != null) {
-      setDefaultCameraId();
-      mPreview.setCamera(null, -1);
-      mCamera.setPreviewCallback(null);
-      mCamera.release();
-      mCamera = null;
-    }
-
-    Activity activity = getActivity();
-    muteStream(false, activity);
   }
 
   public Camera getCamera() {

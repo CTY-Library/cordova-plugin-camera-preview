@@ -1204,6 +1204,24 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
     fragmentTransaction.show(fragment);
     fragmentTransaction.commit();
 
+    // Ensure camera resources are started when showing
+    try {
+      cordova.getActivity().runOnUiThread(new Runnable() {
+        @Override
+        public void run() {
+          try {
+            if (fragment != null) {
+              ((CameraActivity)fragment).resumeCamera();
+            }
+          } catch (Exception e) {
+            // ignore
+          }
+        }
+      });
+    } catch (Exception e) {
+      // ignore
+    }
+
     callbackContext.success();
     return true;
   }
@@ -1217,6 +1235,24 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
     FragmentTransaction fragmentTransaction = fragmentManager.beginTransaction();
     fragmentTransaction.hide(fragment);
     fragmentTransaction.commit();
+
+    // Release camera resources when hiding to avoid it running in background
+    try {
+      cordova.getActivity().runOnUiThread(new Runnable() {
+        @Override
+        public void run() {
+          try {
+            if (fragment != null) {
+              ((CameraActivity)fragment).pauseCamera();
+            }
+          } catch (Exception e) {
+            // ignore
+          }
+        }
+      });
+    } catch (Exception e) {
+      // ignore
+    }
 
     callbackContext.success();
     return true;

@@ -689,6 +689,13 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
 
   if (self.cameraRenderController != nil) {
     [self.cameraRenderController.view setHidden:YES];
+    // stop the capture session to release camera resources while hidden
+    if (self.sessionManager != nil && self.sessionManager.session != nil) {
+      dispatch_async(self.sessionManager.sessionQueue, ^{
+        NSLog(@"Stopping session (hide)");
+        [self.sessionManager.session stopRunning];
+      });
+    }
     pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
   } else {
     pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Camera not started"];
@@ -703,6 +710,13 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
 
   if (self.cameraRenderController != nil) {
     [self.cameraRenderController.view setHidden:NO];
+    // restart the capture session when showing
+    if (self.sessionManager != nil && self.sessionManager.session != nil) {
+      dispatch_async(self.sessionManager.sessionQueue, ^{
+        NSLog(@"Starting session (show)");
+        [self.sessionManager.session startRunning];
+      });
+    }
     pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
   } else {
     pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Camera not started"];
