@@ -29,6 +29,7 @@
 @property (nonatomic) CIImage *latestFrame;
 @property (nonatomic) EAGLContext *context;
 @property (nonatomic) NSLock *renderLock;
+@property (nonatomic, assign) CGSize previewSize;
 @property BOOL dragEnabled;
 @property BOOL tapToTakePicture;
 @property BOOL tapToFocus;

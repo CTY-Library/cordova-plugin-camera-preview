@@ -3,16 +3,31 @@
 @implementation CameraSessionManager
 
 - (UIInterfaceOrientation)currentInterfaceOrientation {
+  __block UIInterfaceOrientation orientation = UIInterfaceOrientationPortrait;
+
+  void (^resolveOrientation)(void) = ^{
   if (@available(iOS 13.0, *)) {
     NSSet<UIScene *> *connectedScenes = [UIApplication sharedApplication].connectedScenes;
     for (UIScene *scene in connectedScenes) {
       if ([scene isKindOfClass:[UIWindowScene class]] && scene.activationState == UISceneActivationStateForegroundActive) {
-        return ((UIWindowScene *)scene).interfaceOrientation;
+        orientation = ((UIWindowScene *)scene).interfaceOrientation;
+        return;
       }
     }
   }
 
-  return UIInterfaceOrientationPortrait;
+    orientation = UIInterfaceOrientationPortrait;
+  };
+
+  if ([NSThread isMainThread]) {
+    resolveOrientation();
+  } else {
+    dispatch_sync(dispatch_get_main_queue(), ^{
+      resolveOrientation();
+    });
+  }
+
+  return orientation;
 }
 
 - (UIViewController *)topViewController {

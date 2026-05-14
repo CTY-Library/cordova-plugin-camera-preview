@@ -1164,6 +1164,12 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
   CDVPluginResult *pluginResult;
 
   if (self.cameraRenderController != NULL) {
+    if (command.arguments.count < 3) {
+      pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Invalid number of parameters"];
+      [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+      return;
+    }
+
     self.onPictureTakenHandlerId = command.callbackId;
 
     CGFloat width = (CGFloat)[command.arguments[0] floatValue];
@@ -1654,6 +1660,10 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(self.captureTimerSeconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
     __strong typeof(weakSelf) strongSelf = weakSelf;
     if (strongSelf == nil || strongSelf.sessionManager == nil || strongSelf.cameraRenderController == nil) {
+      if (strongSelf != nil && strongSelf.onPictureTakenHandlerId != nil) {
+        CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Camera not started"];
+        [strongSelf.commandDelegate sendPluginResult:pluginResult callbackId:strongSelf.onPictureTakenHandlerId];
+      }
       return;
     }
     [strongSelf capturePictureNow:width withHeight:height withQuality:quality];
