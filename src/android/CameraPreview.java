@@ -465,7 +465,7 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
           // add the fragment to the container
           FragmentManager fragmentManager = cordova.getActivity().getFragmentManager();
           FragmentTransaction fragmentTransaction = fragmentManager.beginTransaction();
-
+          
           // Check if fragment is null
           if (fragment != null) {
             fragmentTransaction.add(containerView.getId(), fragment);
@@ -908,18 +908,12 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
     Camera camera = fragment.getCamera();
     Camera.Parameters params = camera.getParameters();
 
-      if (params.isZoomSupported()) {
-          List<Integer> zoomRatios = params.getZoomRatios();
-          if (zoomRatios != null && zoomRatios.size() > 0) {
-              int maxZoom = zoomRatios.get(zoomRatios.size() - 1);
-              callbackContext.success(maxZoom);
-          } else {
-              int maxZoom = params.getMaxZoom();
-              callbackContext.success(maxZoom);
-          }
-      } else {
-          callbackContext.error("Zoom not supported");
-      }
+    if (camera.getParameters().isZoomSupported()) {
+      int maxZoom = camera.getParameters().getMaxZoom();
+      callbackContext.success(maxZoom);
+    } else {
+      callbackContext.error("Zoom not supported");
+    }
 
     return true;
   }
@@ -1210,6 +1204,24 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
     fragmentTransaction.show(fragment);
     fragmentTransaction.commit();
 
+    // Ensure camera resources are started when showing
+    try {
+      cordova.getActivity().runOnUiThread(new Runnable() {
+        @Override
+        public void run() {
+          try {
+            if (fragment != null) {
+              ((CameraActivity)fragment).resumeCamera();
+            }
+          } catch (Exception e) {
+            // ignore
+          }
+        }
+      });
+    } catch (Exception e) {
+      // ignore
+    }
+
     callbackContext.success();
     return true;
   }
@@ -1223,6 +1235,24 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
     FragmentTransaction fragmentTransaction = fragmentManager.beginTransaction();
     fragmentTransaction.hide(fragment);
     fragmentTransaction.commit();
+
+    // Release camera resources when hiding to avoid it running in background
+    try {
+      cordova.getActivity().runOnUiThread(new Runnable() {
+        @Override
+        public void run() {
+          try {
+            if (fragment != null) {
+              ((CameraActivity)fragment).pauseCamera();
+            }
+          } catch (Exception e) {
+            // ignore
+          }
+        }
+      });
+    } catch (Exception e) {
+      // ignore
+    }
 
     callbackContext.success();
     return true;
@@ -1372,7 +1402,7 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
       permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE);
       permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
     }
-
+ 
     return permissions.toArray(new String[0]);
   }
 }
