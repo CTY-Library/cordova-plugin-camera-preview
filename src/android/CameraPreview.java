@@ -1166,16 +1166,6 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
   }
 
   private boolean stopCamera(CallbackContext callbackContext) {
-    if(webViewParent != null) {
-      cordova.getActivity().runOnUiThread(new Runnable() {
-        @Override
-        public void run() {
-          ((ViewGroup)webView.getView()).bringToFront();
-          webViewParent = null;
-        }
-      });
-    }
-
     if(this.hasView(callbackContext) == false){
       return true;
     }
@@ -1190,6 +1180,31 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
       // prevent null pointer exception "Cant perform this action after
       // onSaveInstanceState"
     }
+
+    cordova.getActivity().runOnUiThread(new Runnable() {
+      @Override
+      public void run() {
+        try {
+          // Restore webview visibility/layering after camera-to-back mode.
+          View webViewView = webView.getView();
+          webViewView.setBackgroundColor(0xFFFFFFFF);
+          ((ViewGroup)webViewView).bringToFront();
+          webViewParent = null;
+
+          // Remove the container view to avoid black background artifacts.
+          FrameLayout containerView = (FrameLayout) cordova.getActivity().findViewById(containerViewId);
+          if (containerView != null) {
+            ViewParent parent = containerView.getParent();
+            if (parent instanceof ViewGroup) {
+              ((ViewGroup) parent).removeView(containerView);
+            }
+          }
+        } catch (Exception e) {
+          Log.w(TAG, "stopCamera UI cleanup failed", e);
+        }
+      }
+    });
+
     callbackContext.success();
     return true;
   }
@@ -1211,7 +1226,7 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
         public void run() {
           try {
             if (fragment != null) {
-              ((CameraActivity)fragment).resumeCamera();
+              fragment.resumeCamera();
             }
           } catch (Exception e) {
             // ignore
@@ -1241,13 +1256,13 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
       cordova.getActivity().runOnUiThread(new Runnable() {
         @Override
         public void run() {
-          try {
-            if (fragment != null) {
-              ((CameraActivity)fragment).pauseCamera();
+            try {
+              if (fragment != null) {
+                fragment.pauseCamera();
+              }
+            } catch (Exception e) {
+              // ignore
             }
-          } catch (Exception e) {
-            // ignore
-          }
         }
       });
     } catch (Exception e) {
