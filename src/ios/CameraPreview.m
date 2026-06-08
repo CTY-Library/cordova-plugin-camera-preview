@@ -1215,7 +1215,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
       CDVPluginResult *pluginResult = nil;
 
       if (self.shouldStoreToFile) {
-        NSData *data = [image jpegDataWithCompressionQuality:(CGFloat)quality];
+        NSData *data = UIImageJPEGRepresentation(image, (CGFloat)quality);
         NSString* filePath = [self getTempFilePath:@"jpg"];
         NSError *err;
 
@@ -1488,7 +1488,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
 
   @try {
     UIImage *image = [UIImage imageWithCGImage:imageRef];
-    NSData *imageData = [image jpegDataWithCompressionQuality:quality];
+    NSData *imageData = UIImageJPEGRepresentation(image, quality);
     base64Image = [imageData base64EncodedStringWithOptions:0];
   }
   @catch (NSException *exception) {
@@ -1621,7 +1621,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
     clampedQuality = 0.85f;
   }
 
-  return [image jpegDataWithCompressionQuality:clampedQuality];
+  return UIImageJPEGRepresentation(image, clampedQuality);
 }
 
 - (CDVPluginResult *)pluginResultForStoredImageAtPath:(NSString *)filePath writeError:(NSError *)writeError {
