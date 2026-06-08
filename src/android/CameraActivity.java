@@ -72,7 +72,7 @@ public class CameraActivity extends Fragment {
   private static final String RATIO_FULL = "full";
 
   public interface CameraPreviewListener {
-    void onPictureTaken(String originalPicture);
+    void onPictureTaken(String imageValue, String thumbnailValue, boolean isFile);
     void onPictureTakenError(String message);
     void onSnapshotTaken(String originalPicture);
     void onSnapshotTakenError(String message);
@@ -100,6 +100,8 @@ public class CameraActivity extends Fragment {
   private int numberOfCameras;
   private int cameraCurrentlyLocked;
   private int currentQuality;
+  private boolean currentIncludeThumb = false;
+  private int currentThumbWidth = 200;
   private String desiredPictureRatio = RATIO_FULL;
   private int gridStyleMode = GRID_STYLE_OFF;
   private int captureDelaySeconds = 0;
@@ -271,7 +273,7 @@ public class CameraActivity extends Fragment {
                 setFocusArea((int) event.getX(0), (int) event.getY(0), new Camera.AutoFocusCallback() {
                   public void onAutoFocus(boolean success, Camera camera) {
                     if (success) {
-                      takePicture(0, 0, 85);
+                      takePicture(0, 0, 85, false, 200);
                     } else {
                       Log.d(TAG, "onTouch:" + " setFocusArea() did not suceed");
                     }
@@ -279,7 +281,7 @@ public class CameraActivity extends Fragment {
                 });
 
               } else if (tapToTakePicture) {
-                takePicture(0, 0, 85);
+                takePicture(0, 0, 85, false, 200);
 
               } else if (tapToFocus) {
                 setFocusArea((int) event.getX(0), (int) event.getY(0), new Camera.AutoFocusCallback() {
@@ -1257,6 +1259,53 @@ public class CameraActivity extends Fragment {
     return getTempDirectoryPath() + "/cpcp_capture_" + UUID.randomUUID().toString().replace("-", "").substring(0, 8) + ".jpg";
   }
 
+  private int normalizedThumbWidth(int thumbWidth) {
+    return thumbWidth > 0 ? thumbWidth : 200;
+  }
+
+  private byte[] createThumbnailJpegData(byte[] sourceJpegData, int thumbWidth, int quality) {
+    if (sourceJpegData == null || sourceJpegData.length == 0) {
+      return null;
+    }
+
+    BitmapFactory.Options boundsOptions = new BitmapFactory.Options();
+    boundsOptions.inJustDecodeBounds = true;
+    BitmapFactory.decodeByteArray(sourceJpegData, 0, sourceJpegData.length, boundsOptions);
+
+    if (boundsOptions.outWidth <= 0 || boundsOptions.outHeight <= 0) {
+      return null;
+    }
+
+    int targetWidth = Math.min(normalizedThumbWidth(thumbWidth), boundsOptions.outWidth);
+    int inSampleSize = 1;
+    while ((boundsOptions.outWidth / inSampleSize) > (targetWidth * 2)) {
+      inSampleSize *= 2;
+    }
+
+    BitmapFactory.Options decodeOptions = new BitmapFactory.Options();
+    decodeOptions.inSampleSize = Math.max(1, inSampleSize);
+    Bitmap decoded = BitmapFactory.decodeByteArray(sourceJpegData, 0, sourceJpegData.length, decodeOptions);
+    if (decoded == null) {
+      return null;
+    }
+
+    Bitmap thumbnail = decoded;
+    if (decoded.getWidth() > targetWidth) {
+      int targetHeight = Math.max(1, Math.round((float) decoded.getHeight() * targetWidth / (float) decoded.getWidth()));
+      thumbnail = Bitmap.createScaledBitmap(decoded, targetWidth, targetHeight, true);
+    }
+
+    ByteArrayOutputStream thumbOutput = new ByteArrayOutputStream();
+    thumbnail.compress(Bitmap.CompressFormat.JPEG, quality, thumbOutput);
+    byte[] thumbData = thumbOutput.toByteArray();
+
+    if (thumbnail != decoded) {
+      thumbnail.recycle();
+    }
+    decoded.recycle();
+    return thumbData;
+  }
+
   PictureCallback jpegPictureCallback = new PictureCallback(){
     public void onPictureTaken(byte[] data, Camera arg1){
       Log.d(TAG, "CameraPreview jpegPictureCallback");
@@ -1290,8 +1339,26 @@ public class CameraActivity extends Fragment {
         if (!storeToFile) {
           String encodedImage = Base64.encodeToString(data, Base64.NO_WRAP);
 
+          if (currentIncludeThumb) {
+            byte[] thumbData = createThumbnailJpegData(data, currentThumbWidth, currentQuality);
+            if (thumbData == null) {
+              if (eventListener != null) {
+                eventListener.onPictureTakenError("Failed to create thumbnail");
+              }
+              return;
+            }
+
+            String thumbnailBase64 = Base64.encodeToString(thumbData, Base64.NO_WRAP);
+            if (eventListener != null) {
+              eventListener.onPictureTaken(encodedImage, thumbnailBase64, false);
+            } else {
+              Log.e(TAG, "eventListener is null");
+            }
+            return;
+          }
+
           if (eventListener != null) {
-            eventListener.onPictureTaken(encodedImage);
+            eventListener.onPictureTaken(encodedImage, null, false);
           } else {
             Log.e(TAG, "eventListener is null");
           }
@@ -1300,8 +1367,31 @@ public class CameraActivity extends Fragment {
           FileOutputStream out = new FileOutputStream(path);
           out.write(data);
           out.close();
+
+          if (currentIncludeThumb) {
+            byte[] thumbData = createThumbnailJpegData(data, currentThumbWidth, currentQuality);
+            if (thumbData == null) {
+              if (eventListener != null) {
+                eventListener.onPictureTakenError("Failed to create thumbnail");
+              }
+              return;
+            }
+
+            String thumbPath = getTempFilePath();
+            FileOutputStream thumbOut = new FileOutputStream(thumbPath);
+            thumbOut.write(thumbData);
+            thumbOut.close();
+
+            if (eventListener != null) {
+              eventListener.onPictureTaken(path, thumbPath, true);
+            } else {
+              Log.e(TAG, "eventListener is null");
+            }
+            return;
+          }
+
           if (eventListener != null) {
-            eventListener.onPictureTaken(path);
+            eventListener.onPictureTaken(path, null, true);
           } else {
             Log.e(TAG, "eventListener is null");
           }
@@ -1477,6 +1567,10 @@ public class CameraActivity extends Fragment {
   }
 
   public void takePicture(final int width, final int height, final int quality){
+    takePicture(width, height, quality, false, 200);
+  }
+
+  public void takePicture(final int width, final int height, final int quality, final boolean includeThumb, final int thumbWidth){
     Log.d(TAG, "CameraPreview takePicture width: " + width + ", height: " + height + ", quality: " + quality);
 
     if(mPreview != null) {
@@ -1529,6 +1623,8 @@ public class CameraActivity extends Fragment {
             Camera.Size size = getBestPictureSizeByRatio(params.getSupportedPictureSizes(), targetRatio, width, height);
             params.setPictureSize(size.width, size.height);
             currentQuality = quality;
+            currentIncludeThumb = includeThumb;
+            currentThumbWidth = normalizedThumbWidth(thumbWidth);
 
             if(cameraCurrentlyLocked == Camera.CameraInfo.CAMERA_FACING_FRONT && !storeToFile) {
               // The image will be recompressed in the callback

@@ -2,6 +2,7 @@
 #import <Cordova/CDVPlugin.h>
 #import <Cordova/CDVInvokedUrlCommand.h>
 #import <GLKit/GLKit.h>
+#import <ImageIO/ImageIO.h>
 #import "CameraPreview.h"
 
 #define TMP_IMAGE_PREFIX @"cpcp_capture_"
@@ -87,6 +88,13 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
   self.webView.opaque = NO;
   self.webView.backgroundColor = [UIColor clearColor];
   self.pendingResumeWhenActive = NO;
+
+  // Best-effort cleanup: remove stale plugin temp captures older than 90 days.
+  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
+    NSTimeInterval olderThanMs = 90.0 * 24.0 * 60.0 * 60.0 * 1000.0;
+    NSDictionary *cleanupSummary = [self cleanManagedTempFilesWithOlderThanMs:olderThanMs];
+    NSLog(@"[CameraPreview][pluginInitialize] temp cleanup summary=%@", cleanupSummary);
+  });
 
   [[NSNotificationCenter defaultCenter] addObserver:self
                                            selector:@selector(onApplicationDidBecomeActive:)
@@ -1176,8 +1184,21 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
     CGFloat width = (CGFloat)[command.arguments[0] floatValue];
     CGFloat height = (CGFloat)[command.arguments[1] floatValue];
     CGFloat quality = (CGFloat)[command.arguments[2] floatValue] / 100.0f;
+    BOOL includeThumb = command.arguments.count > 3 ? [command.arguments[3] boolValue] : NO;
+    CGFloat thumbWidth = 200.0f;
+    if (command.arguments.count > 4) {
+      thumbWidth = (CGFloat)[command.arguments[4] floatValue];
+      if (thumbWidth <= 0.0f) {
+        thumbWidth = 200.0f;
+      }
+    }
 
-    [self invokeTakePicture:width withHeight:height withQuality:quality callbackId:command.callbackId];
+    [self invokeTakePicture:width
+                 withHeight:height
+                withQuality:quality
+               includeThumb:includeThumb
+                 thumbWidth:thumbWidth
+                 callbackId:command.callbackId];
   } else {
     pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Camera not started"];
     [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
@@ -1194,7 +1215,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
       CDVPluginResult *pluginResult = nil;
 
       if (self.shouldStoreToFile) {
-        NSData *data = UIImageJPEGRepresentation(image, (CGFloat) quality);
+        NSData *data = [image jpegDataWithCompressionQuality:(CGFloat)quality];
         NSString* filePath = [self getTempFilePath:@"jpg"];
         NSError *err;
 
@@ -1381,6 +1402,25 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
   [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 }
 
+- (void) cleanTempFiles:(CDVInvokedUrlCommand*)command {
+  NSTimeInterval olderThanMs = 0.0;
+  if (command.arguments.count > 0) {
+    id arg = command.arguments[0];
+    if ([arg isKindOfClass:[NSNumber class]]) {
+      olderThanMs = [arg doubleValue];
+    } else if ([arg isKindOfClass:[NSString class]]) {
+      olderThanMs = [(NSString *)arg doubleValue];
+    }
+  }
+  if (olderThanMs < 0.0) {
+    olderThanMs = 0.0;
+  }
+
+  NSDictionary *summary = [self cleanManagedTempFilesWithOlderThanMs:olderThanMs];
+  CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:summary];
+  [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+}
+
 - (void) setPreviewPosition:(CDVInvokedUrlCommand*)command {
   CDVPluginResult *pluginResult;
 
@@ -1448,7 +1488,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
 
   @try {
     UIImage *image = [UIImage imageWithCGImage:imageRef];
-    NSData *imageData = UIImageJPEGRepresentation(image, quality);
+    NSData *imageData = [image jpegDataWithCompressionQuality:quality];
     base64Image = [imageData base64EncodedStringWithOptions:0];
   }
   @catch (NSException *exception) {
@@ -1581,7 +1621,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
     clampedQuality = 0.85f;
   }
 
-  return UIImageJPEGRepresentation(image, clampedQuality);
+  return [image jpegDataWithCompressionQuality:clampedQuality];
 }
 
 - (CDVPluginResult *)pluginResultForStoredImageAtPath:(NSString *)filePath writeError:(NSError *)writeError {
@@ -1602,12 +1642,162 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
   return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArray:params];
 }
 
+- (CGFloat)normalizedThumbWidth:(CGFloat)thumbWidth {
+  return thumbWidth > 0.0f ? thumbWidth : 200.0f;
+}
+
+- (NSData *)jpegDataFromCGImage:(CGImageRef)imageRef quality:(CGFloat)quality {
+  if (imageRef == nil) {
+    return nil;
+  }
+
+  CGFloat clampedQuality = quality;
+  if (clampedQuality <= 0.0f || clampedQuality > 1.0f) {
+    clampedQuality = 0.85f;
+  }
+
+  NSMutableData *outputData = [NSMutableData data];
+  CGImageDestinationRef destination = CGImageDestinationCreateWithData((__bridge CFMutableDataRef)outputData,
+                                                                        CFSTR("public.jpeg"),
+                                                                        1,
+                                                                        NULL);
+  if (destination == nil) {
+    return nil;
+  }
+
+  NSDictionary *options = @{(__bridge NSString *)kCGImageDestinationLossyCompressionQuality: @(clampedQuality)};
+  CGImageDestinationAddImage(destination, imageRef, (__bridge CFDictionaryRef)options);
+  BOOL finalizeOK = CGImageDestinationFinalize(destination);
+  CFRelease(destination);
+
+  if (!finalizeOK) {
+    return nil;
+  }
+
+  return outputData;
+}
+
+- (NSData *)thumbnailJPEGDataFromJPEGData:(NSData *)sourceData thumbWidth:(CGFloat)thumbWidth quality:(CGFloat)quality {
+  if (sourceData == nil || sourceData.length == 0) {
+    return nil;
+  }
+
+  CGImageSourceRef imageSource = CGImageSourceCreateWithData((__bridge CFDataRef)sourceData, NULL);
+  if (imageSource == nil) {
+    return nil;
+  }
+
+  CGFloat normalizedWidth = [self normalizedThumbWidth:thumbWidth];
+  CGFloat sourceWidth = 0.0f;
+  CGFloat sourceHeight = 0.0f;
+  CFDictionaryRef properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, NULL);
+  if (properties != NULL) {
+    NSDictionary *dict = (__bridge NSDictionary *)properties;
+    NSNumber *w = dict[(NSString *)kCGImagePropertyPixelWidth];
+    NSNumber *h = dict[(NSString *)kCGImagePropertyPixelHeight];
+    sourceWidth = w != nil ? [w floatValue] : 0.0f;
+    sourceHeight = h != nil ? [h floatValue] : 0.0f;
+    CFRelease(properties);
+  }
+
+  if (sourceWidth <= 0.0f || sourceHeight <= 0.0f) {
+    CFRelease(imageSource);
+    return nil;
+  }
+
+  CGFloat scale = MIN(1.0f, normalizedWidth / sourceWidth);
+  CGFloat thumbnailMaxPixel = ceil(MAX(sourceWidth, sourceHeight) * scale);
+  NSDictionary *thumbOptions = @{
+    (NSString *)kCGImageSourceCreateThumbnailFromImageAlways: @YES,
+    (NSString *)kCGImageSourceCreateThumbnailWithTransform: @YES,
+    (NSString *)kCGImageSourceShouldCache: @NO,
+    (NSString *)kCGImageSourceThumbnailMaxPixelSize: @(MAX(1.0f, thumbnailMaxPixel))
+  };
+
+  CGImageRef thumbnailImageRef = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, (__bridge CFDictionaryRef)thumbOptions);
+  CFRelease(imageSource);
+  if (thumbnailImageRef == nil) {
+    return nil;
+  }
+
+  NSData *thumbnailData = [self jpegDataFromCGImage:thumbnailImageRef quality:quality];
+  CGImageRelease(thumbnailImageRef);
+  return thumbnailData;
+}
+
+- (UIImage *)thumbnailImageFromImage:(UIImage *)sourceImage thumbWidth:(CGFloat)thumbWidth {
+  if (sourceImage == nil || sourceImage.size.width <= 0.0f || sourceImage.size.height <= 0.0f) {
+    return nil;
+  }
+
+  CGFloat targetWidth = MIN([self normalizedThumbWidth:thumbWidth], sourceImage.size.width);
+  CGFloat scale = targetWidth / sourceImage.size.width;
+  CGFloat targetHeight = MAX(1.0f, floor(sourceImage.size.height * scale));
+  CGSize targetSize = CGSizeMake(targetWidth, targetHeight);
+
+  UIGraphicsBeginImageContextWithOptions(targetSize, NO, 1.0f);
+  [sourceImage drawInRect:CGRectMake(0.0f, 0.0f, targetSize.width, targetSize.height)];
+  UIImage *thumbnailImage = UIGraphicsGetImageFromCurrentImageContext();
+  UIGraphicsEndImageContext();
+
+  return thumbnailImage;
+}
+
+- (CDVPluginResult *)pluginResultForImageValue:(id)imageValue
+                                thumbnailValue:(id)thumbnailValue
+                                         isFile:(BOOL)isFile {
+  if (imageValue == nil || thumbnailValue == nil) {
+    return [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Failed to build image result"];
+  }
+
+  NSMutableDictionary *payload = [[NSMutableDictionary alloc] init];
+  payload[@"image"] = imageValue;
+  payload[@"thumbnail"] = thumbnailValue;
+  payload[@"isFile"] = @(isFile);
+  return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:payload];
+}
+
 - (void) invokeTakePicture {
-  [self invokeTakePicture:0.0 withHeight:0.0 withQuality:0.85 callbackId:self.onPictureTakenHandlerId];
+  [self invokeTakePicture:0.0 withHeight:0.0 withQuality:0.85 includeThumb:NO thumbWidth:200.0 callbackId:self.onPictureTakenHandlerId];
 }
 
 - (void) invokeTakePicture:(CGFloat) width withHeight:(CGFloat) height withQuality:(CGFloat) quality {
-  [self invokeTakePicture:width withHeight:height withQuality:quality callbackId:self.onPictureTakenHandlerId];
+  [self invokeTakePicture:width withHeight:height withQuality:quality includeThumb:NO thumbWidth:200.0 callbackId:self.onPictureTakenHandlerId];
+}
+
+- (void) invokeTakePicture:(CGFloat) width
+                withHeight:(CGFloat) height
+               withQuality:(CGFloat) quality
+              includeThumb:(BOOL)includeThumb
+                thumbWidth:(CGFloat)thumbWidth
+                callbackId:(NSString *)callbackId {
+  if (self.captureTimerSeconds <= 0.0) {
+    [self capturePictureNow:width
+                 withHeight:height
+                withQuality:quality
+               includeThumb:includeThumb
+                 thumbWidth:thumbWidth
+                 callbackId:callbackId];
+    return;
+  }
+
+  __weak typeof(self) weakSelf = self;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(self.captureTimerSeconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    __strong typeof(weakSelf) strongSelf = weakSelf;
+    if (strongSelf == nil || strongSelf.sessionManager == nil || strongSelf.cameraRenderController == nil) {
+      if (strongSelf != nil && callbackId != nil) {
+        CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Camera not started"];
+        [strongSelf sendPicturePluginResult:pluginResult callbackId:callbackId keepCallback:NO];
+      }
+      return;
+    }
+    [strongSelf capturePictureNow:width
+                       withHeight:height
+                      withQuality:quality
+                     includeThumb:includeThumb
+                       thumbWidth:thumbWidth
+                       callbackId:callbackId];
+  });
 }
 
 - (void) invokeTakePictureOnFocus {
@@ -1615,7 +1805,12 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
   [self.sessionManager takePictureOnFocus];
 }
 
-- (void) capturePictureNow:(CGFloat) width withHeight:(CGFloat) height withQuality:(CGFloat) quality callbackId:(NSString *)callbackId {
+- (void) capturePictureNow:(CGFloat) width
+                withHeight:(CGFloat) height
+               withQuality:(CGFloat) quality
+              includeThumb:(BOOL)includeThumb
+                thumbWidth:(CGFloat)thumbWidth
+                callbackId:(NSString *)callbackId {
     if (callbackId == nil || callbackId.length == 0) {
       NSLog(@"[CameraPreview][capturePictureNow] ERROR: callbackId is nil/empty, abort capture");
       return;
@@ -1638,6 +1833,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
     CIFilter *ciFilter = self.sessionManager.ciFilter;
     BOOL storeToFile = self.shouldStoreToFile;
     BOOL keepCallback = NO;
+    CGFloat normalizedThumbWidth = [self normalizedThumbWidth:thumbWidth];
         BOOL needsResize = (width > 0 && height > 0);
         BOOL needsFilter = (ciFilter != nil);
         BOOL requiresHeavyProcessing = needsResize || needsFilter;
@@ -1704,6 +1900,22 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
             NSLog(@"[CameraPreview][storeToFile] returning path: %@", filePath);
           }
 
+          if (writeOK && includeThumb) {
+            NSData *thumbnailData = [self thumbnailJPEGDataFromJPEGData:imageData
+                                                             thumbWidth:normalizedThumbWidth
+                                                                quality:quality];
+            NSString *thumbPath = [self getTempFilePath:@"jpg"];
+            NSError *thumbWriteError = nil;
+            BOOL thumbWriteOK = (thumbnailData != nil) && [thumbnailData writeToFile:thumbPath options:NSAtomicWrite error:&thumbWriteError];
+
+            if (!thumbWriteOK) {
+              pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_IO_EXCEPTION
+                                               messageAsString:(thumbWriteError != nil ? thumbWriteError.localizedDescription : @"Failed to store thumbnail")];
+            } else {
+              pluginResult = [self pluginResultForImageValue:filePath thumbnailValue:thumbPath isFile:YES];
+            }
+          }
+
           [self sendPicturePluginResult:pluginResult callbackId:callbackId keepCallback:keepCallback];
           return;
         }
@@ -1722,9 +1934,9 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
 
         CIImage *capturedCImage;
         if (width > 0 && height > 0) {
-          CGFloat scaleHeight = width / capturedImage.size.height;
-          CGFloat scaleWidth  = height / capturedImage.size.width;
-          CGFloat scale = scaleHeight > scaleWidth ? scaleWidth : scaleHeight;
+          CGFloat scaleWidth = width / capturedImage.size.width;
+          CGFloat scaleHeight = height / capturedImage.size.height;
+          CGFloat scale = MIN(scaleWidth, scaleHeight);
 
           CIFilter *resizeFilter = [CIFilter filterWithName:@"CILanczosScaleTransform"];
           [resizeFilter setValue:[[CIImage alloc] initWithCGImage:[capturedImage CGImage]] forKey:kCIInputImageKey];
@@ -1774,7 +1986,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
         CDVPluginResult *pluginResult;
         if (storeToFile) {
           NSLog(@"[CameraPreview][storeToFile] heavy path writing processed image");
-          NSData *data = UIImageJPEGRepresentation([UIImage imageWithCGImage:resultFinalImage], (CGFloat)quality);
+          NSData *data = [self jpegDataFromCGImage:resultFinalImage quality:quality];
           NSString *filePath = [self getTempFilePath:@"jpg"];
           NSLog(@"[CameraPreview][storeToFile] writing file: %@", filePath);
           NSError *err;
@@ -1786,10 +1998,36 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
           if (writeOK) {
             NSLog(@"[CameraPreview][storeToFile] returning path: %@", filePath);
           }
+
+          if (writeOK && includeThumb) {
+            NSData *thumbnailData = [self thumbnailJPEGDataFromJPEGData:data
+                                                             thumbWidth:normalizedThumbWidth
+                                                                quality:quality];
+            NSString *thumbPath = [self getTempFilePath:@"jpg"];
+            NSError *thumbErr;
+            BOOL thumbWriteOK = (thumbnailData != nil) && [thumbnailData writeToFile:thumbPath options:NSAtomicWrite error:&thumbErr];
+            if (!thumbWriteOK) {
+              pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_IO_EXCEPTION
+                                               messageAsString:(thumbErr != nil ? thumbErr.localizedDescription : @"Failed to store thumbnail")];
+            } else {
+              pluginResult = [self pluginResultForImageValue:filePath thumbnailValue:thumbPath isFile:YES];
+            }
+          }
         } else {
           NSString *base64Image = [self getBase64Image:resultFinalImage withQuality:quality];
           if (base64Image == nil) {
             pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Failed to encode image"];
+          } else if (includeThumb) {
+            NSData *mainImageData = [self jpegDataFromCGImage:resultFinalImage quality:quality];
+            NSData *thumbnailData = [self thumbnailJPEGDataFromJPEGData:mainImageData
+                                                             thumbWidth:normalizedThumbWidth
+                                                                quality:quality];
+            NSString *thumbnailBase64 = [thumbnailData base64EncodedStringWithOptions:0];
+            if (thumbnailBase64 == nil) {
+              pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Failed to encode thumbnail"];
+            } else {
+              pluginResult = [self pluginResultForImageValue:base64Image thumbnailValue:thumbnailBase64 isFile:NO];
+            }
           } else {
             NSMutableArray *params = [[NSMutableArray alloc] init];
             [params addObject:base64Image];
@@ -1819,26 +2057,6 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
     }];
 }
 
-- (void) invokeTakePicture:(CGFloat) width withHeight:(CGFloat) height withQuality:(CGFloat) quality callbackId:(NSString *)callbackId {
-  if (self.captureTimerSeconds <= 0.0) {
-    [self capturePictureNow:width withHeight:height withQuality:quality callbackId:callbackId];
-    return;
-  }
-
-  __weak typeof(self) weakSelf = self;
-  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(self.captureTimerSeconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-    __strong typeof(weakSelf) strongSelf = weakSelf;
-    if (strongSelf == nil || strongSelf.sessionManager == nil || strongSelf.cameraRenderController == nil) {
-      if (strongSelf != nil && callbackId != nil) {
-        CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Camera not started"];
-        [strongSelf sendPicturePluginResult:pluginResult callbackId:callbackId keepCallback:NO];
-      }
-      return;
-    }
-    [strongSelf capturePictureNow:width withHeight:height withQuality:quality callbackId:callbackId];
-  });
-}
-
 - (NSString*)getTempDirectoryPath
 {
   NSString* tmpPath = [NSTemporaryDirectory()stringByStandardizingPath];
@@ -1858,6 +2076,81 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
     } while ([fileMgr fileExistsAtPath:filePath]);
 
     return filePath;
+}
+
+- (BOOL)isManagedTempCaptureFileName:(NSString *)fileName {
+  if (fileName == nil || fileName.length == 0) {
+    return NO;
+  }
+
+  return [fileName hasPrefix:TMP_IMAGE_PREFIX];
+}
+
+- (NSDictionary *)cleanManagedTempFilesWithOlderThanMs:(NSTimeInterval)olderThanMs {
+  NSString *tmpPath = [self getTempDirectoryPath];
+  NSFileManager *fileManager = [[NSFileManager alloc] init];
+  NSError *listError = nil;
+  NSArray<NSString *> *files = [fileManager contentsOfDirectoryAtPath:tmpPath error:&listError];
+
+  NSInteger scanned = 0;
+  NSInteger deleted = 0;
+  NSInteger failed = 0;
+  unsigned long long bytesFreed = 0;
+
+  if (listError != nil || files == nil) {
+    return @{
+      @"scanned": @(0),
+      @"deleted": @(0),
+      @"failed": @(0),
+      @"bytesFreed": @(0),
+      @"olderThanMs": @(olderThanMs),
+      @"error": (listError.localizedDescription ?: @"Failed to list temp directory")
+    };
+  }
+
+  NSDate *cutoffDate = nil;
+  if (olderThanMs > 0.0) {
+    cutoffDate = [NSDate dateWithTimeIntervalSinceNow:-(olderThanMs / 1000.0)];
+  }
+
+  for (NSString *fileName in files) {
+    if (![self isManagedTempCaptureFileName:fileName]) {
+      continue;
+    }
+
+    scanned += 1;
+    NSString *path = [tmpPath stringByAppendingPathComponent:fileName];
+
+    NSError *attributesError = nil;
+    NSDictionary<NSFileAttributeKey, id> *attributes = [fileManager attributesOfItemAtPath:path error:&attributesError];
+    if (attributesError != nil || attributes == nil) {
+      failed += 1;
+      continue;
+    }
+
+    NSDate *modifiedDate = attributes[NSFileModificationDate];
+    if (cutoffDate != nil && modifiedDate != nil && [modifiedDate compare:cutoffDate] == NSOrderedDescending) {
+      continue;
+    }
+
+    unsigned long long fileSize = [attributes fileSize];
+    NSError *removeError = nil;
+    BOOL removed = [fileManager removeItemAtPath:path error:&removeError];
+    if (removed) {
+      deleted += 1;
+      bytesFreed += fileSize;
+    } else {
+      failed += 1;
+    }
+  }
+
+  return @{
+    @"scanned": @(scanned),
+    @"deleted": @(deleted),
+    @"failed": @(failed),
+    @"bytesFreed": @(bytesFreed),
+    @"olderThanMs": @(olderThanMs)
+  };
 }
 
 @end

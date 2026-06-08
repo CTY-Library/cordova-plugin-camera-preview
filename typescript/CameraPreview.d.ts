@@ -28,7 +28,9 @@ declare module 'cordova-plugin-camera-preview' {
 
   interface CameraPreviewTakePictureOptions {
     height?: number;
+    includeThumb?: boolean;
     quality?: number;
+    thumbWidth?: number;
     width?: number;
   }
 
@@ -39,6 +41,19 @@ declare module 'cordova-plugin-camera-preview' {
   interface CameraPreviewPreviewSizeDimension {
     height?: number;
     width?: number;
+  }
+
+  interface CameraPreviewCleanTempFilesOptions {
+    olderThanMs?: number;
+  }
+
+  interface CameraPreviewCleanTempFilesResult {
+    scanned: number;
+    deleted: number;
+    failed: number;
+    bytesFreed: number;
+    olderThanMs: number;
+    error?: string;
   }
 
   interface CameraPreview {
@@ -61,6 +76,7 @@ declare module 'cordova-plugin-camera-preview' {
     setPreviewBackgroundColor(backgroundColor?: string, onSuccess?: CameraPreviewSuccessHandler, onError?: CameraPreviewErrorHandler): void;
     setCaptureRatio(ratio?: string, onSuccess?: CameraPreviewSuccessHandler, onError?: CameraPreviewErrorHandler): void;
     setStoreToFile(storeToFile?: boolean, onSuccess?: CameraPreviewSuccessHandler, onError?: CameraPreviewErrorHandler): void;
+    cleanTempFiles(options?: CameraPreviewCleanTempFilesOptions|CameraPreviewSuccessHandler, onSuccess?: ((result: CameraPreviewCleanTempFilesResult) => any)|CameraPreviewErrorHandler, onError?: CameraPreviewErrorHandler): void;
     setCaptureTimer(seconds?: number, onSuccess?: CameraPreviewSuccessHandler, onError?: CameraPreviewErrorHandler): void;
     setPreviewPosition(x?: number|{x:number,y:number}, y?: number, onSuccess?: CameraPreviewSuccessHandler, onError?: CameraPreviewErrorHandler): void;
     getSupportedPictureSizes(onSuccess?: CameraPreviewSuccessHandler, onError?: CameraPreviewErrorHandler): void;

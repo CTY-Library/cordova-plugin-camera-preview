@@ -119,12 +119,18 @@ CameraPreview.takePicture = function(opts, onSuccess, onError) {
 
   opts.width = opts.width || 0;
   opts.height = opts.height || 0;
+  opts.includeThumb = !!opts.includeThumb;
+
+  var thumbWidth = Number(opts.thumbWidth);
+  if (!thumbWidth || thumbWidth <= 0) {
+    thumbWidth = 200;
+  }
 
   if (!opts.quality || opts.quality > 100 || opts.quality < 0) {
     opts.quality = 85;
   }
 
-  exec(onSuccess, onError, PLUGIN_NAME, "takePicture", [opts.width, opts.height, opts.quality]);
+  exec(onSuccess, onError, PLUGIN_NAME, "takePicture", [opts.width, opts.height, opts.quality, opts.includeThumb, thumbWidth]);
 };
 
 CameraPreview.setColorEffect = function(effect, onSuccess, onError) {
@@ -182,6 +188,26 @@ CameraPreview.setCaptureRatio = function(ratio, onSuccess, onError) {
  */
 CameraPreview.setStoreToFile = function(storeToFile, onSuccess, onError) {
   exec(onSuccess, onError, PLUGIN_NAME, "setStoreToFile", [!!storeToFile]);
+};
+
+/**
+ * Clean plugin-generated temporary capture files from the app temp directory.
+ * options.olderThanMs: if > 0, only delete files older than this age.
+ */
+CameraPreview.cleanTempFiles = function(options, onSuccess, onError) {
+  if (!options) {
+    options = {};
+  } else if (isFunction(options)) {
+    onSuccess = options;
+    options = {};
+  }
+
+  var olderThanMs = Number(options.olderThanMs);
+  if (!olderThanMs || olderThanMs < 0) {
+    olderThanMs = 0;
+  }
+
+  exec(onSuccess, onError, PLUGIN_NAME, "cleanTempFiles", [olderThanMs]);
 };
 
 /**

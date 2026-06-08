@@ -56,6 +56,7 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
   private static final String SET_CAPTURE_RATIO_ACTION = "setCaptureRatio";
   private static final String SET_CAPTURE_TIMER_ACTION = "setCaptureTimer";
   private static final String SET_STORE_TO_FILE_ACTION = "setStoreToFile";
+  private static final String CLEAN_TEMP_FILES_ACTION = "cleanTempFiles";
   private static final String PREVIEW_POSITION_ACTION = "setPreviewPosition";
   private static final String SWITCH_CAMERA_ACTION = "switchCamera";
   private static final String TAKE_PICTURE_ACTION = "takePicture";
@@ -111,6 +112,19 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
   }
 
   @Override
+  protected void pluginInitialize() {
+    super.pluginInitialize();
+    final long olderThanMs = 90L * 24L * 60L * 60L * 1000L;
+    cordova.getThreadPool().execute(new Runnable() {
+      @Override
+      public void run() {
+        JSONObject summary = cleanManagedTempFilesInternal(olderThanMs);
+        Log.d(TAG, "[pluginInitialize] temp cleanup summary=" + summary.toString());
+      }
+    });
+  }
+
+  @Override
   public boolean execute(String action, JSONArray args, CallbackContext callbackContext) throws JSONException {
 
     if (START_CAMERA_ACTION.equals(action)) {
@@ -123,7 +137,12 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
         return true;
       }
     } else if (TAKE_PICTURE_ACTION.equals(action)) {
-      return takePicture(args.getInt(0), args.getInt(1), args.getInt(2), callbackContext);
+      boolean includeThumb = args.length() > 3 && args.optBoolean(3, false);
+      int thumbWidth = args.length() > 4 ? args.optInt(4, 200) : 200;
+      if (thumbWidth <= 0) {
+        thumbWidth = 200;
+      }
+      return takePicture(args.getInt(0), args.getInt(1), args.getInt(2), includeThumb, thumbWidth, callbackContext);
     } else if (TAKE_SNAPSHOT_ACTION.equals(action)) {
       return takeSnapshot(args.getInt(0), callbackContext);
     }else if (START_RECORD_VIDEO_ACTION.equals(action)) {
@@ -159,6 +178,9 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
       return setCaptureTimer(args.getInt(0), callbackContext);
     } else if (SET_STORE_TO_FILE_ACTION.equals(action)) {
       return setStoreToFile(args.getBoolean(0), callbackContext);
+    } else if (CLEAN_TEMP_FILES_ACTION.equals(action)) {
+      double olderThanMs = args.length() > 0 ? args.optDouble(0, 0.0) : 0.0;
+      return cleanTempFiles(olderThanMs, callbackContext);
     } else if (PREVIEW_POSITION_ACTION.equals(action)) {
       return setPreviewPosition(args.getInt(0), args.getInt(1), callbackContext);
     } else if (SUPPORTED_FLASH_MODES_ACTION.equals(action)) {
@@ -296,6 +318,19 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
     });
 
     callbackContext.success();
+    return true;
+  }
+
+  private boolean cleanTempFiles(double olderThanMsInput, CallbackContext callbackContext) {
+    final long olderThanMs = Math.max(0L, (long) olderThanMsInput);
+    cordova.getThreadPool().execute(new Runnable() {
+      @Override
+      public void run() {
+        JSONObject summary = cleanManagedTempFilesInternal(olderThanMs);
+        callbackContext.success(summary);
+      }
+    });
+
     return true;
   }
 
@@ -528,23 +563,41 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
   }
 
   private boolean takePicture(int width, int height, int quality, CallbackContext callbackContext) {
+    return takePicture(width, height, quality, false, 200, callbackContext);
+  }
+
+  private boolean takePicture(int width, int height, int quality, boolean includeThumb, int thumbWidth, CallbackContext callbackContext) {
     if(this.hasView(callbackContext) == false){
       return true;
     }
     takePictureCallbackContext = callbackContext;
 
-    fragment.takePicture(width, height, quality);
+    fragment.takePicture(width, height, quality, includeThumb, thumbWidth);
 
     return true;
   }
 
-  public void onPictureTaken(String originalPicture) {
+  public void onPictureTaken(String imageValue, String thumbnailValue, boolean isFile) {
     Log.d(TAG, "returning picture");
 
-    JSONArray data = new JSONArray();
-    data.put(originalPicture);
+    PluginResult pluginResult;
+    if (thumbnailValue == null) {
+      JSONArray data = new JSONArray();
+      data.put(imageValue);
+      pluginResult = new PluginResult(PluginResult.Status.OK, data);
+    } else {
+      JSONObject payload = new JSONObject();
+      try {
+        payload.put("image", imageValue);
+        payload.put("thumbnail", thumbnailValue);
+        payload.put("isFile", isFile);
+      } catch (JSONException e) {
+        onPictureTakenError("Failed to build image payload");
+        return;
+      }
+      pluginResult = new PluginResult(PluginResult.Status.OK, payload);
+    }
 
-    PluginResult pluginResult = new PluginResult(PluginResult.Status.OK, data);
     pluginResult.setKeepCallback(fragment.tapToTakePicture);
     takePictureCallbackContext.sendPluginResult(pluginResult);
   }
@@ -552,6 +605,88 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
   public void onPictureTakenError(String message) {
     Log.d(TAG, "CameraPreview onPictureTakenError");
     takePictureCallbackContext.error(message);
+  }
+
+  private JSONObject cleanManagedTempFilesInternal(long olderThanMs) {
+    int scanned = 0;
+    int deleted = 0;
+    int failed = 0;
+    long bytesFreed = 0L;
+
+    try {
+      Activity activity = cordova.getActivity();
+      if (activity == null) {
+        JSONObject result = new JSONObject();
+        result.put("scanned", 0);
+        result.put("deleted", 0);
+        result.put("failed", 0);
+        result.put("bytesFreed", 0);
+        result.put("olderThanMs", olderThanMs);
+        result.put("error", "Activity is unavailable");
+        return result;
+      }
+
+      File cacheDir = activity.getCacheDir();
+      if (cacheDir == null) {
+        JSONObject result = new JSONObject();
+        result.put("scanned", 0);
+        result.put("deleted", 0);
+        result.put("failed", 0);
+        result.put("bytesFreed", 0);
+        result.put("olderThanMs", olderThanMs);
+        result.put("error", "Cache directory is unavailable");
+        return result;
+      }
+
+      File[] files = cacheDir.listFiles();
+      long cutoffTime = olderThanMs > 0 ? (System.currentTimeMillis() - olderThanMs) : 0L;
+      if (files != null) {
+        for (File file : files) {
+          if (file == null) {
+            continue;
+          }
+
+          String name = file.getName();
+          if (!name.startsWith("cpcp_capture_")) {
+            continue;
+          }
+
+          scanned += 1;
+          if (olderThanMs > 0 && file.lastModified() > cutoffTime) {
+            continue;
+          }
+
+          long size = file.length();
+          if (file.delete()) {
+            deleted += 1;
+            bytesFreed += size;
+          } else {
+            failed += 1;
+          }
+        }
+      }
+
+      JSONObject result = new JSONObject();
+      result.put("scanned", scanned);
+      result.put("deleted", deleted);
+      result.put("failed", failed);
+      result.put("bytesFreed", bytesFreed);
+      result.put("olderThanMs", olderThanMs);
+      return result;
+    } catch (Exception e) {
+      JSONObject result = new JSONObject();
+      try {
+        result.put("scanned", scanned);
+        result.put("deleted", deleted);
+        result.put("failed", failed + 1);
+        result.put("bytesFreed", bytesFreed);
+        result.put("olderThanMs", olderThanMs);
+        result.put("error", e.getMessage());
+      } catch (JSONException ignored) {
+        // no-op
+      }
+      return result;
+    }
   }
 
   private boolean startRecordVideo(final String camera, final int width, final int height, final int quality, final boolean withFlash, CallbackContext callbackContext) {

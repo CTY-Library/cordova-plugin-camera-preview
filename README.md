@@ -171,7 +171,12 @@ CameraPreview.hide();
 
 <info>Take the picture. If width and height are not specified or are 0 it will use the defaults. If width and height are specified, it will choose a supported photo size that is closest to width and height specified and has closest aspect ratio to the preview. The argument `quality` defaults to `85` and specifies the quality/compression value: `0=max compression`, `100=max quality`.</info><br/>
 
-<info>Return format: the success callback receives an array with one element. Use `result[0]` to access the payload.</info><br/>
+<info>Optional thumbnail args: `includeThumb` (default `false`) and `thumbWidth` (default `200`).</info><br/>
+
+<info>Return format:
+- `includeThumb = false` (default): callback receives an array with one element (`result[0]`) exactly as before.
+- `includeThumb = true`: callback receives an object `{ image, thumbnail, isFile }`.
+</info><br/>
 
 ```javascript
 CameraPreview.takePicture({width:640, height:640, quality: 85}, function(result) {
@@ -191,6 +196,13 @@ CameraPreview.takePicture({width:640, height:640, quality: 85}, function(result)
   // One simple example is if you are going to use it inside an HTML img src attribute then you would do the following:
   imageSrcData = 'data:image/jpeg;base64,' + payload;
   $('img#my-img').attr('src', imageSrcData);
+});
+
+// Include thumbnail (thumbWidth defaults to 200 if not provided)
+CameraPreview.takePicture({width: 640, height: 640, quality: 85, includeThumb: true, thumbWidth: 200}, function(result) {
+  // result = { image: string, thumbnail: string, isFile: boolean }
+  // isFile=true => image/thumbnail are file paths; false => base64 JPEG strings
+  console.log(result.image, result.thumbnail, result.isFile);
 });
 
 // OR if you want to use the default options.
@@ -460,6 +472,34 @@ CameraPreview.setCaptureRatio('4:3', function(){
 // Switch to storing captured images to a file
 CameraPreview.setStoreToFile(true, function(){
   console.log('storeToFile enabled');
+});
+```
+
+### cleanTempFiles([options, successCallback, errorCallback])
+
+<info>Delete plugin-generated temporary capture files (`cpcp_capture_*`) from the app temp directory. Use this when `storeToFile` is enabled and you no longer need older temp files. Implemented on iOS and Android.</info><br/>
+
+`options` (optional):
+
+- `olderThanMs` (`number`): if greater than `0`, only deletes files older than this age in milliseconds. Default: `0` (delete all matching files).
+
+Success callback result:
+
+- `scanned`: matching files found
+- `deleted`: files deleted
+- `failed`: files that failed to delete
+- `bytesFreed`: total bytes released
+- `olderThanMs`: applied age filter
+
+```javascript
+// Delete all plugin temp capture files
+CameraPreview.cleanTempFiles(function(result){
+  console.log('cleanup result', result);
+});
+
+// Delete only files older than 24 hours
+CameraPreview.cleanTempFiles({ olderThanMs: 24 * 60 * 60 * 1000 }, function(result){
+  console.log('deleted:', result.deleted, 'freed bytes:', result.bytesFreed);
 });
 ```
 
