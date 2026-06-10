@@ -120,6 +120,28 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
   return [UIApplication sharedApplication].applicationState == UIApplicationStateActive;
 }
 
+- (UIScrollView *)webViewScrollViewIfAvailable {
+  if (self.webView == nil) {
+    return nil;
+  }
+
+  SEL scrollViewSelector = NSSelectorFromString(@"scrollView");
+  if (![self.webView respondsToSelector:scrollViewSelector]) {
+    return nil;
+  }
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+  id scrollView = [self.webView performSelector:scrollViewSelector];
+#pragma clang diagnostic pop
+
+  if ([scrollView isKindOfClass:[UIScrollView class]]) {
+    return (UIScrollView *)scrollView;
+  }
+
+  return nil;
+}
+
 - (void)startCaptureSessionIfAllowed:(NSString *)source {
   if (self.sessionManager == nil || self.sessionManager.session == nil) {
     NSLog(@"[CameraPreview][%@] skip start: session is nil", source);
@@ -256,9 +278,11 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
       // make transparent
       self.webView.opaque = NO;
       self.webView.backgroundColor = [UIColor clearColor];
-
-      self.webView.scrollView.opaque = NO;
-      self.webView.scrollView.backgroundColor = [UIColor clearColor];
+      UIScrollView *webScrollView = [self webViewScrollViewIfAvailable];
+      if (webScrollView != nil) {
+        webScrollView.opaque = NO;
+        webScrollView.backgroundColor = [UIColor clearColor];
+      }
 
       if (![self.previewBackgroundView isDescendantOfView:self.viewController.view]) {
         [self.viewController.view insertSubview:self.previewBackgroundView atIndex:0];
@@ -1591,39 +1615,6 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
   NSLog(@"[CameraPreview][sendPicturePluginResult] callback sent for callbackId=%@", callbackId);
 }
 
-- (NSData *)jpegDataFromSampleBuffer:(CMSampleBufferRef)sampleBuffer quality:(CGFloat)quality {
-  if (sampleBuffer == NULL) {
-    return nil;
-  }
-
-  NSData *imageData = [AVCaptureStillImageOutput jpegStillImageNSDataRepresentation:sampleBuffer];
-  if (imageData != nil && imageData.length > 0) {
-    return imageData;
-  }
-
-  CVImageBufferRef imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer);
-  if (imageBuffer == NULL) {
-    return nil;
-  }
-
-  CIImage *ciImage = [CIImage imageWithCVPixelBuffer:imageBuffer];
-  CIContext *context = [CIContext contextWithOptions:nil];
-  CGImageRef cgImage = [context createCGImage:ciImage fromRect:ciImage.extent];
-  if (cgImage == nil) {
-    return nil;
-  }
-
-  UIImage *image = [UIImage imageWithCGImage:cgImage];
-  CGImageRelease(cgImage);
-
-  CGFloat clampedQuality = quality;
-  if (clampedQuality <= 0.0f || clampedQuality > 1.0f) {
-    clampedQuality = 0.85f;
-  }
-
-  return UIImageJPEGRepresentation(image, clampedQuality);
-}
-
 - (CDVPluginResult *)pluginResultForStoredImageAtPath:(NSString *)filePath writeError:(NSError *)writeError {
   if (writeError != nil) {
     return [CDVPluginResult resultWithStatus:CDVCommandStatus_IO_EXCEPTION messageAsString:[writeError localizedDescription]];
@@ -1816,7 +1807,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
       return;
     }
 
-    AVCaptureConnection *connection = [self.sessionManager.stillImageOutput connectionWithMediaType:AVMediaTypeVideo];
+    AVCaptureConnection *connection = [self.sessionManager photoConnection];
 
     if (connection == nil) {
       NSLog(@"[CameraPreview][capturePictureNow] ERROR: no video connection available");
@@ -1844,15 +1835,9 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
           needsResize ? @"YES" : @"NO",
           needsFilter ? @"YES" : @"NO");
 
-    [self.sessionManager.stillImageOutput captureStillImageAsynchronouslyFromConnection:connection completionHandler:^(CMSampleBufferRef sampleBuffer, NSError *error) {
+    [self.sessionManager capturePhotoWithCompletion:^(NSData *imageData, NSError *error) {
 
       NSLog(@"Done creating still image");
-
-      // Keep sampleBuffer alive while we process on a background queue.
-      CMSampleBufferRef retainedSampleBuffer = sampleBuffer;
-      if (retainedSampleBuffer != NULL) {
-        CFRetain(retainedSampleBuffer);
-      }
 
       // --- Move ALL heavy processing off the main thread so WKWebView URL
       //     scheme tasks are not starved while the main run loop is blocked. ---
@@ -1869,15 +1854,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
           return;
         }
 
-        if (retainedSampleBuffer == NULL) {
-          NSLog(@"[CameraPreview][capturePictureNow] ERROR: sampleBuffer is nil");
-          CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Failed to capture image: empty buffer"];
-          [self sendPicturePluginResult:pluginResult callbackId:callbackId keepCallback:keepCallback];
-          return;
-        }
-
-        NSData *imageData = [self jpegDataFromSampleBuffer:retainedSampleBuffer quality:quality];
-        if (imageData == nil) {
+        if (imageData == nil || imageData.length == 0) {
           NSLog(@"[CameraPreview][capturePictureNow] ERROR: imageData is nil");
           CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Failed to encode captured image data"];
           [self sendPicturePluginResult:pluginResult callbackId:callbackId keepCallback:keepCallback];
@@ -2043,9 +2020,6 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
           [self sendPicturePluginResult:pluginResult callbackId:callbackId keepCallback:keepCallback];
         }
         @finally {
-          if (retainedSampleBuffer != NULL) {
-            CFRelease(retainedSampleBuffer);
-          }
           if (finalImage != nil) {
             CGImageRelease(finalImage);
           }

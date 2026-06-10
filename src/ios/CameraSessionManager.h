@@ -38,6 +38,8 @@
 - (BOOL) isTorchActive;
 - (void) setTorchMode;
 - (AVCaptureVideoOrientation) getCurrentOrientation:(UIInterfaceOrientation)toInterfaceOrientation;
+- (AVCaptureConnection *) photoConnection;
+- (void) capturePhotoWithCompletion:(void(^)(NSData *imageData, NSError *error))completion;
 
 @property (atomic) CIFilter *ciFilter;
 @property (nonatomic) NSLock *filterLock;
@@ -48,7 +50,7 @@
 @property (nonatomic) CGFloat videoZoomFactor;
 @property (nonatomic) AVCaptureDevice *device;
 @property (nonatomic) AVCaptureDeviceInput *videoDeviceInput;
-@property (nonatomic) AVCaptureStillImageOutput *stillImageOutput;
+@property (nonatomic) AVCapturePhotoOutput *photoOutput;
 @property (nonatomic) AVCaptureVideoDataOutput *dataOutput;
 @property (nonatomic, weak) id<OnFocusDelegate> delegate;
 @property (nonatomic) NSString *currentWhiteBalanceMode;

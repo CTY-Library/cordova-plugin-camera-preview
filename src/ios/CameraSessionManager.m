@@ -1,6 +1,34 @@
 #include "CameraSessionManager.h"
 
+@interface CameraSessionManager () <AVCapturePhotoCaptureDelegate>
+@property (nonatomic, copy) void (^photoCaptureCompletion)(NSData *imageData, NSError *error);
+@end
+
 @implementation CameraSessionManager
+
+- (AVCaptureFlashMode)validatedFlashModeForPhotoOutput:(AVCapturePhotoOutput *)photoOutput {
+  AVCaptureFlashMode requestedMode = AVCaptureFlashModeAuto;
+  NSInteger defaultMode = self.defaultFlashMode;
+
+  if (defaultMode == AVCaptureFlashModeOff || defaultMode == AVCaptureFlashModeOn || defaultMode == AVCaptureFlashModeAuto) {
+    requestedMode = (AVCaptureFlashMode)defaultMode;
+  }
+
+  NSArray<NSNumber *> *supportedModes = photoOutput.supportedFlashModes;
+  if ([supportedModes containsObject:@(requestedMode)]) {
+    return requestedMode;
+  }
+
+  if ([supportedModes containsObject:@(AVCaptureFlashModeAuto)]) {
+    return AVCaptureFlashModeAuto;
+  }
+
+  if ([supportedModes containsObject:@(AVCaptureFlashModeOff)]) {
+    return AVCaptureFlashModeOff;
+  }
+
+  return requestedMode;
+}
 
 - (UIInterfaceOrientation)currentInterfaceOrientation {
   __block UIInterfaceOrientation orientation = UIInterfaceOrientationPortrait;
@@ -195,11 +223,10 @@
         self.videoDeviceInput = videoDeviceInput;
       }
 
-      AVCaptureStillImageOutput *stillImageOutput = [[AVCaptureStillImageOutput alloc] init];
-      if ([self.session canAddOutput:stillImageOutput]) {
-        [self.session addOutput:stillImageOutput];
-        [stillImageOutput setOutputSettings:@{AVVideoCodecKey : AVVideoCodecJPEG}];
-        self.stillImageOutput = stillImageOutput;
+      AVCapturePhotoOutput *photoOutput = [[AVCapturePhotoOutput alloc] init];
+      if ([self.session canAddOutput:photoOutput]) {
+        [self.session addOutput:photoOutput];
+        self.photoOutput = photoOutput;
       }
 
       AVCaptureVideoDataOutput *dataOutput = [[AVCaptureVideoDataOutput alloc] init];
@@ -222,8 +249,8 @@
 
 - (void) updateOrientation:(AVCaptureVideoOrientation)orientation {
   AVCaptureConnection *captureConnection;
-  if (self.stillImageOutput != nil) {
-    captureConnection = [self.stillImageOutput connectionWithMediaType:AVMediaTypeVideo];
+  if (self.photoOutput != nil) {
+    captureConnection = [self.photoOutput connectionWithMediaType:AVMediaTypeVideo];
     if ([captureConnection isVideoOrientationSupported]) {
       [captureConnection setVideoOrientation:orientation];
     }
@@ -234,6 +261,107 @@
       [captureConnection setVideoOrientation:orientation];
     }
   }
+}
+
+- (AVCaptureConnection *)photoConnection {
+  if (self.photoOutput == nil) {
+    return nil;
+  }
+
+  return [self.photoOutput connectionWithMediaType:AVMediaTypeVideo];
+}
+
+- (void)capturePhotoWithCompletion:(void (^)(NSData *imageData, NSError *error))completion {
+  AVCapturePhotoOutput *photoOutput = self.photoOutput;
+  if (photoOutput == nil) {
+    if (completion != nil) {
+      NSError *error = [NSError errorWithDomain:@"CameraSessionManager"
+                                           code:-1
+                                       userInfo:@{NSLocalizedDescriptionKey: @"Photo output is not available"}];
+      completion(nil, error);
+    }
+    return;
+  }
+
+  if (self.photoCaptureCompletion != nil) {
+    if (completion != nil) {
+      NSError *busyError = [NSError errorWithDomain:@"CameraSessionManager"
+                                               code:-3
+                                           userInfo:@{NSLocalizedDescriptionKey: @"Photo capture already in progress"}];
+      completion(nil, busyError);
+    }
+    return;
+  }
+
+  AVCapturePhotoSettings *settings = [AVCapturePhotoSettings photoSettings];
+  if ([settings respondsToSelector:@selector(setFlashMode:)]) {
+    settings.flashMode = [self validatedFlashModeForPhotoOutput:photoOutput];
+  }
+
+  self.photoCaptureCompletion = completion;
+  [photoOutput capturePhotoWithSettings:settings delegate:self];
+}
+
+- (void)captureOutput:(AVCapturePhotoOutput *)output
+didFinishProcessingPhoto:(AVCapturePhoto *)photo
+                error:(NSError *)error API_AVAILABLE(ios(11.0)) {
+  void (^completion)(NSData *, NSError *) = self.photoCaptureCompletion;
+  self.photoCaptureCompletion = nil;
+
+  if (completion == nil) {
+    return;
+  }
+
+  if (error != nil) {
+    completion(nil, error);
+    return;
+  }
+
+  NSData *imageData = [photo fileDataRepresentation];
+  if (imageData == nil || imageData.length == 0) {
+    NSError *imageError = [NSError errorWithDomain:@"CameraSessionManager"
+                                               code:-2
+                                           userInfo:@{NSLocalizedDescriptionKey: @"Failed to process photo data"}];
+    completion(nil, imageError);
+    return;
+  }
+
+  completion(imageData, nil);
+}
+
+- (void)captureOutput:(AVCapturePhotoOutput *)captureOutput
+didFinishProcessingPhotoSampleBuffer:(CMSampleBufferRef)photoSampleBuffer
+previewPhotoSampleBuffer:(CMSampleBufferRef)previewPhotoSampleBuffer
+resolvedSettings:(AVCaptureResolvedPhotoSettings *)resolvedSettings
+ bracketSettings:(AVCaptureBracketedStillImageSettings *)bracketSettings
+             error:(NSError *)error {
+  void (^completion)(NSData *, NSError *) = self.photoCaptureCompletion;
+  self.photoCaptureCompletion = nil;
+
+  if (completion == nil) {
+    return;
+  }
+
+  if (error != nil) {
+    completion(nil, error);
+    return;
+  }
+
+  NSData *imageData = nil;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+  imageData = [AVCapturePhotoOutput JPEGPhotoDataRepresentationForJPEGSampleBuffer:photoSampleBuffer
+                                                             previewPhotoSampleBuffer:previewPhotoSampleBuffer];
+#pragma clang diagnostic pop
+  if (imageData == nil || imageData.length == 0) {
+    NSError *imageError = [NSError errorWithDomain:@"CameraSessionManager"
+                                               code:-2
+                                           userInfo:@{NSLocalizedDescriptionKey: @"Failed to process photo data"}];
+    completion(nil, imageError);
+    return;
+  }
+
+  completion(imageData, nil);
 }
 
 - (void) switchCamera:(void(^)(BOOL switched))completion {
