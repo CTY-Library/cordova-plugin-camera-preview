@@ -50,6 +50,8 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
   private static final String GET_FLASH_MODE_ACTION = "getFlashMode";
   private static final String SET_FLASH_MODE_ACTION = "setFlashMode";
   private static final String START_CAMERA_ACTION = "startCamera";
+  private static final String HAS_PERMISSION_ACTION = "hasPermission";
+  private static final String REQUEST_PERMISSION_ACTION = "requestPermission";
   private static final String STOP_CAMERA_ACTION = "stopCamera";
   private static final String PREVIEW_SIZE_ACTION = "setPreviewSize";
   private static final String SET_PREVIEW_BACKGROUND_COLOR_ACTION = "setPreviewBackgroundColor";
@@ -84,6 +86,7 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
 
   private static final int CAM_REQ_CODE = 0;
   private static final int VID_REQ_CODE = 1;
+  private static final int PERMISSION_REQ_CODE = 2;
   private String VIDEO_FILE_PATH = "";
   private static final String VIDEO_FILE_EXTENSION = ".mp4";
 
@@ -98,6 +101,7 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
   private CallbackContext stopRecordVideoCallbackContext;
   private CallbackContext setFocusCallbackContext;
   private CallbackContext startCameraCallbackContext;
+  private CallbackContext permissionCallbackContext;
   private CallbackContext tapBackButtonContext  = null;
 
   private CallbackContext execCallback;
@@ -127,7 +131,11 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
   @Override
   public boolean execute(String action, JSONArray args, CallbackContext callbackContext) throws JSONException {
 
-    if (START_CAMERA_ACTION.equals(action)) {
+    if (HAS_PERMISSION_ACTION.equals(action)) {
+      return hasPermission(callbackContext);
+    } else if (REQUEST_PERMISSION_ACTION.equals(action)) {
+      return requestPermission(callbackContext);
+    } else if (START_CAMERA_ACTION.equals(action)) {
       if (cordova.hasPermission(permissions[0])) {
         return startCamera(args.getInt(0), args.getInt(1), args.getInt(2), args.getInt(3), args.getString(4), args.getBoolean(5), args.getBoolean(6), args.getBoolean(7), args.getString(8), args.getString(9), args.getBoolean(10), args.getBoolean(11), args.getBoolean(12), args.length() > 13 && args.getBoolean(13), callbackContext);
       } else {
@@ -240,7 +248,17 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
   public void onRequestPermissionResult(int requestCode, String[] permissions, int[] grantResults) throws JSONException {
     for(int r:grantResults){
       if(r == PackageManager.PERMISSION_DENIED){
-        execCallback.sendPluginResult(new PluginResult(PluginResult.Status.ILLEGAL_ACCESS_EXCEPTION));
+        if (requestCode == PERMISSION_REQ_CODE) {
+          if (permissionCallbackContext != null) {
+            permissionCallbackContext.error("Camera permission denied");
+            permissionCallbackContext = null;
+          }
+          return;
+        }
+
+        if (execCallback != null) {
+          execCallback.sendPluginResult(new PluginResult(PluginResult.Status.ILLEGAL_ACCESS_EXCEPTION));
+        }
         return;
       }
     }
@@ -249,7 +267,33 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
       startCamera(this.execArgs.getInt(0), this.execArgs.getInt(1), this.execArgs.getInt(2), this.execArgs.getInt(3), this.execArgs.getString(4), this.execArgs.getBoolean(5), this.execArgs.getBoolean(6), this.execArgs.getBoolean(7), this.execArgs.getString(8), this.execArgs.getString(9), this.execArgs.getBoolean(10), this.execArgs.getBoolean(11), this.execArgs.getBoolean(12), this.execArgs.length() > 13 && this.execArgs.getBoolean(13), this.execCallback);
     }else if(requestCode == VID_REQ_CODE){
       startRecordVideo(this.execArgs.getString(0), this.execArgs.getInt(1), this.execArgs.getInt(2), this.execArgs.getInt(3), this.execArgs.getBoolean(4),  this.execCallback);
+    } else if (requestCode == PERMISSION_REQ_CODE) {
+      if (permissionCallbackContext != null) {
+        permissionCallbackContext.success();
+        permissionCallbackContext = null;
+      }
     }
+  }
+
+  private boolean hasPermission(CallbackContext callbackContext) {
+    callbackContext.sendPluginResult(new PluginResult(PluginResult.Status.OK, cordova.hasPermission(permissions[0])));
+    return true;
+  }
+
+  private boolean requestPermission(CallbackContext callbackContext) {
+    if (cordova.hasPermission(permissions[0])) {
+      callbackContext.success();
+      return true;
+    }
+
+    if (permissionCallbackContext != null) {
+      callbackContext.error("Camera permission request already in progress");
+      return true;
+    }
+
+    permissionCallbackContext = callbackContext;
+    cordova.requestPermissions(this, PERMISSION_REQ_CODE, permissions);
+    return true;
   }
 
   private boolean hasView(CallbackContext callbackContext) {

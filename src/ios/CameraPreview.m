@@ -1,6 +1,7 @@
 #import <Cordova/CDV.h>
 #import <Cordova/CDVPlugin.h>
 #import <Cordova/CDVInvokedUrlCommand.h>
+#import <AVFoundation/AVFoundation.h>
 #import <GLKit/GLKit.h>
 #import <ImageIO/ImageIO.h>
 #import "CameraPreview.h"
@@ -824,6 +825,50 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
   }
 
   [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+}
+
+- (void) hasPermission:(CDVInvokedUrlCommand*)command {
+  AVAuthorizationStatus status = [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo];
+  BOOL hasPermission = (status == AVAuthorizationStatusAuthorized);
+  CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:hasPermission];
+  [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+}
+
+- (void) requestPermission:(CDVInvokedUrlCommand*)command {
+  AVAuthorizationStatus status = [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo];
+
+  if (status == AVAuthorizationStatusAuthorized) {
+    CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
+    [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+    return;
+  }
+
+  if (status == AVAuthorizationStatusDenied) {
+    NSString *message = @"Access has been denied. Change your setting > this app > Camera enable";
+    CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:message];
+    [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+    return;
+  }
+
+  if (status == AVAuthorizationStatusRestricted) {
+    NSString *message = @"Access has been restricted. Change your setting > Privacy > Camera enable";
+    CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:message];
+    [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+    return;
+  }
+
+  [AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo completionHandler:^(BOOL granted) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      if (granted) {
+        CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
+        [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+      } else {
+        NSString *message = @"Camera permission not granted";
+        CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:message];
+        [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+      }
+    });
+  }];
 }
 
 - (void) switchCamera:(CDVInvokedUrlCommand*)command {

@@ -21,6 +21,7 @@ Cordova plugin that allows camera interaction from Javascript and HTML
   <li>Set a custom size for the preview box</li>
   <li>Set a custom alpha for the preview box</li>
   <li>Set the focus mode, zoom, color effects, exposure mode, white balance mode and exposure compensation</li>
+  <li>Check and request camera runtime permission</li>
   <li>Tap to focus</li>
   <li>Record Videos</li>
 </ul>
@@ -72,6 +73,7 @@ meteor add cordova:cordova-plugin-camera-preview@X.X.X
 #### Android Quirks
 
 1. When using the plugin for older devices, the camera preview will take the focus inside the app once initialized. In order to prevent the app from closing when a user presses the back button, the event for the camera view is disabled. If you still want the user to navigate, you can add a listener for the back event for the preview (see <code>[onBackButton](#onBackButton)</code>)
+2. Runtime camera permission is required. You can call `hasPermission`/`requestPermission` before `startCamera`, or call `startCamera` directly and let the plugin request permission when needed.
 
 # Methods
 
@@ -165,6 +167,37 @@ CameraPreview.show();
 
 ```javascript
 CameraPreview.hide();
+```
+
+### hasPermission([successCallback, errorCallback])
+
+<info>Check whether camera permission is currently granted.</info><br/>
+
+Success callback receives a boolean:
+
+- `true`: camera permission granted
+- `false`: camera permission not granted
+
+```javascript
+CameraPreview.hasPermission(function(hasPermission) {
+  console.log('camera permission:', hasPermission);
+}, function(err) {
+  console.error('hasPermission failed:', err);
+});
+```
+
+### requestPermission([successCallback, errorCallback])
+
+<info>Request camera permission at runtime.</info><br/>
+
+<info>When permission is already granted, success callback is called immediately. If permission is denied or restricted, error callback is called.</info><br/>
+
+```javascript
+CameraPreview.requestPermission(function() {
+  console.log('camera permission granted');
+}, function(err) {
+  console.error('requestPermission failed:', err);
+});
 ```
 
 ### takePicture(options, successCallback, [errorCallback])

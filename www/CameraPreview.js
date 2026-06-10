@@ -86,6 +86,14 @@ CameraPreview.show = function(onSuccess, onError) {
   exec(onSuccess, onError, PLUGIN_NAME, "showCamera", []);
 };
 
+CameraPreview.hasPermission = function(onSuccess, onError) {
+  exec(onSuccess, onError, PLUGIN_NAME, "hasPermission", []);
+};
+
+CameraPreview.requestPermission = function(onSuccess, onError) {
+  exec(onSuccess, onError, PLUGIN_NAME, "requestPermission", []);
+};
+
 CameraPreview.takeSnapshot = function(opts, onSuccess, onError) {
   if (!opts) {
     opts = {};
