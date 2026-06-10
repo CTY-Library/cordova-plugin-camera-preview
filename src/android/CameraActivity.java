@@ -26,6 +26,7 @@ import android.media.CamcorderProfile;
 import android.media.MediaRecorder;
 import android.os.Bundle;
 import android.os.Handler;
+import android.provider.MediaStore;
 import android.util.Log;
 import android.util.TypedValue;
 import android.util.DisplayMetrics;
@@ -102,6 +103,7 @@ public class CameraActivity extends Fragment {
   private int currentQuality;
   private boolean currentIncludeThumb = false;
   private int currentThumbWidth = 200;
+  private boolean currentSaveToLibrary = false;
   private String desiredPictureRatio = RATIO_FULL;
   private int gridStyleMode = GRID_STYLE_OFF;
   private int captureDelaySeconds = 0;
@@ -273,7 +275,7 @@ public class CameraActivity extends Fragment {
                 setFocusArea((int) event.getX(0), (int) event.getY(0), new Camera.AutoFocusCallback() {
                   public void onAutoFocus(boolean success, Camera camera) {
                     if (success) {
-                      takePicture(0, 0, 85, false, 200);
+                      takePicture(0, 0, 85, false, 200, false);
                     } else {
                       Log.d(TAG, "onTouch:" + " setFocusArea() did not suceed");
                     }
@@ -281,7 +283,7 @@ public class CameraActivity extends Fragment {
                 });
 
               } else if (tapToTakePicture) {
-                takePicture(0, 0, 85, false, 200);
+                takePicture(0, 0, 85, false, 200, false);
 
               } else if (tapToFocus) {
                 setFocusArea((int) event.getX(0), (int) event.getY(0), new Camera.AutoFocusCallback() {
@@ -1306,6 +1308,31 @@ public class CameraActivity extends Fragment {
     return thumbData;
   }
 
+  private String saveImageFileToLibrary(String sourcePath) {
+    try {
+      Activity activity = getActivity();
+      if (activity == null) {
+        return "Activity unavailable while saving to photo library";
+      }
+
+      Bitmap bitmap = BitmapFactory.decodeFile(sourcePath);
+      if (bitmap == null) {
+        return "Failed to decode stored image for library save";
+      }
+
+      String name = "cpcp_" + System.currentTimeMillis();
+      String uri = MediaStore.Images.Media.insertImage(activity.getContentResolver(), bitmap, name, "Captured by camera preview");
+      bitmap.recycle();
+      if (uri == null || uri.length() == 0) {
+        return "Failed to save image to photo library";
+      }
+
+      return null;
+    } catch (Exception e) {
+      return e.getMessage() != null ? e.getMessage() : "Failed to save image to photo library";
+    }
+  }
+
   PictureCallback jpegPictureCallback = new PictureCallback(){
     public void onPictureTaken(byte[] data, Camera arg1){
       Log.d(TAG, "CameraPreview jpegPictureCallback");
@@ -1367,6 +1394,16 @@ public class CameraActivity extends Fragment {
           FileOutputStream out = new FileOutputStream(path);
           out.write(data);
           out.close();
+
+          if (currentSaveToLibrary) {
+            String saveErr = saveImageFileToLibrary(path);
+            if (saveErr != null) {
+              if (eventListener != null) {
+                eventListener.onPictureTakenError(saveErr);
+              }
+              return;
+            }
+          }
 
           if (currentIncludeThumb) {
             byte[] thumbData = createThumbnailJpegData(data, currentThumbWidth, currentQuality);
@@ -1567,10 +1604,10 @@ public class CameraActivity extends Fragment {
   }
 
   public void takePicture(final int width, final int height, final int quality){
-    takePicture(width, height, quality, false, 200);
+    takePicture(width, height, quality, false, 200, false);
   }
 
-  public void takePicture(final int width, final int height, final int quality, final boolean includeThumb, final int thumbWidth){
+  public void takePicture(final int width, final int height, final int quality, final boolean includeThumb, final int thumbWidth, final boolean saveToLibrary){
     Log.d(TAG, "CameraPreview takePicture width: " + width + ", height: " + height + ", quality: " + quality);
 
     if(mPreview != null) {
@@ -1625,6 +1662,7 @@ public class CameraActivity extends Fragment {
             currentQuality = quality;
             currentIncludeThumb = includeThumb;
             currentThumbWidth = normalizedThumbWidth(thumbWidth);
+            currentSaveToLibrary = saveToLibrary;
 
             if(cameraCurrentlyLocked == Camera.CameraInfo.CAMERA_FACING_FRONT && !storeToFile) {
               // The image will be recompressed in the callback

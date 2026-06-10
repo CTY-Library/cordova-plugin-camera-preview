@@ -30,6 +30,7 @@ declare module 'cordova-plugin-camera-preview' {
     height?: number;
     includeThumb?: boolean;
     quality?: number;
+    saveToLibrary?: boolean;
     thumbWidth?: number;
     width?: number;
   }
@@ -64,6 +65,7 @@ declare module 'cordova-plugin-camera-preview' {
     show(onSuccess?: CameraPreviewSuccessHandler, onError?: CameraPreviewErrorHandler): void;
     hasPermission(onSuccess?: ((hasPermission: boolean) => any), onError?: CameraPreviewErrorHandler): void;
     requestPermission(onSuccess?: CameraPreviewSuccessHandler, onError?: CameraPreviewErrorHandler): void;
+    openAppSettings(onSuccess?: CameraPreviewSuccessHandler, onError?: CameraPreviewErrorHandler): void;
     takePicture(options?: CameraPreviewTakePictureOptions|CameraPreviewSuccessHandler, onSuccess?: CameraPreviewSuccessHandler|CameraPreviewErrorHandler, onError?: CameraPreviewErrorHandler): void;
     takeSnapshot(options?: CameraPreviewTakeSnapshotOptions|CameraPreviewSuccessHandler, onSuccess?: CameraPreviewSuccessHandler|CameraPreviewErrorHandler, onError?: CameraPreviewErrorHandler): void;
     setColorEffect(effect: CameraPreviewColorEffect|string, onSuccess?: CameraPreviewSuccessHandler, onError?: CameraPreviewErrorHandler): void;

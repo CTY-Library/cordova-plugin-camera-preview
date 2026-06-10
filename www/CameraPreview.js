@@ -94,6 +94,10 @@ CameraPreview.requestPermission = function(onSuccess, onError) {
   exec(onSuccess, onError, PLUGIN_NAME, "requestPermission", []);
 };
 
+CameraPreview.openAppSettings = function(onSuccess, onError) {
+  exec(onSuccess, onError, PLUGIN_NAME, "openAppSettings", []);
+};
+
 CameraPreview.takeSnapshot = function(opts, onSuccess, onError) {
   if (!opts) {
     opts = {};
@@ -128,6 +132,7 @@ CameraPreview.takePicture = function(opts, onSuccess, onError) {
   opts.width = opts.width || 0;
   opts.height = opts.height || 0;
   opts.includeThumb = !!opts.includeThumb;
+  opts.saveToLibrary = !!opts.saveToLibrary;
 
   var thumbWidth = Number(opts.thumbWidth);
   if (!thumbWidth || thumbWidth <= 0) {
@@ -138,7 +143,7 @@ CameraPreview.takePicture = function(opts, onSuccess, onError) {
     opts.quality = 85;
   }
 
-  exec(onSuccess, onError, PLUGIN_NAME, "takePicture", [opts.width, opts.height, opts.quality, opts.includeThumb, thumbWidth]);
+  exec(onSuccess, onError, PLUGIN_NAME, "takePicture", [opts.width, opts.height, opts.quality, opts.includeThumb, thumbWidth, opts.saveToLibrary]);
 };
 
 CameraPreview.setColorEffect = function(effect, onSuccess, onError) {

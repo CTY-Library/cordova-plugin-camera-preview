@@ -173,6 +173,8 @@ CameraPreview.hide();
 
 <info>Check whether camera permission is currently granted.</info><br/>
 
+<info>This checks camera permission only. It does not check photo library permission for `saveToLibrary`.</info><br/>
+
 Success callback receives a boolean:
 
 - `true`: camera permission granted
@@ -190,6 +192,8 @@ CameraPreview.hasPermission(function(hasPermission) {
 
 <info>Request camera permission at runtime.</info><br/>
 
+<info>This requests camera permission only. Photo library permission is only needed when `storeToFile = true` and `saveToLibrary = true` in `takePicture`.</info><br/>
+
 <info>When permission is already granted, success callback is called immediately. If permission is denied or restricted, error callback is called.</info><br/>
 
 ```javascript
@@ -200,11 +204,29 @@ CameraPreview.requestPermission(function() {
 });
 ```
 
+### openAppSettings([successCallback, errorCallback])
+
+<info>Open this app's system settings page. Useful after receiving `PERMISSION_DENIED_NEED_SETTINGS`.</info><br/>
+
+```javascript
+CameraPreview.openAppSettings(function() {
+  console.log('opened app settings');
+}, function(err) {
+  console.error('openAppSettings failed:', err);
+});
+```
+
 ### takePicture(options, successCallback, [errorCallback])
 
 <info>Take the picture. If width and height are not specified or are 0 it will use the defaults. If width and height are specified, it will choose a supported photo size that is closest to width and height specified and has closest aspect ratio to the preview. The argument `quality` defaults to `85` and specifies the quality/compression value: `0=max compression`, `100=max quality`.</info><br/>
 
 <info>Optional thumbnail args: `includeThumb` (default `false`) and `thumbWidth` (default `200`).</info><br/>
+
+<info>Optional save arg: `saveToLibrary` (default `false`). If `storeToFile = true` and `saveToLibrary = true`, the captured image is also saved to the system photo library.</info><br/>
+
+<info>When saving to library fails because of iOS permission state, the error callback may receive an object with `code` and `message` (for example: `PERMISSION_DENIED_FIRST_TIME`, `PERMISSION_DENIED_NEED_SETTINGS`, `PERMISSION_RESTRICTED`).</info><br/>
+
+<info>On Android legacy devices where storage permission is required for library save, the error callback may return `PERMISSION_DENIED_FIRST_TIME` or `PERMISSION_DENIED_NEED_SETTINGS` as `code`.</info><br/>
 
 <info>Return format:
 - `includeThumb = false` (default): callback receives an array with one element (`result[0]`) exactly as before.
@@ -236,6 +258,12 @@ CameraPreview.takePicture({width: 640, height: 640, quality: 85, includeThumb: t
   // result = { image: string, thumbnail: string, isFile: boolean }
   // isFile=true => image/thumbnail are file paths; false => base64 JPEG strings
   console.log(result.image, result.thumbnail, result.isFile);
+});
+
+// Store to temp file and also save to device photo library
+CameraPreview.setStoreToFile(true);
+CameraPreview.takePicture({width: 640, height: 640, quality: 85, saveToLibrary: true}, function(result) {
+  console.log(result[0]); // temp file path
 });
 
 // OR if you want to use the default options.

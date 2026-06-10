@@ -4,9 +4,14 @@
 #import <AVFoundation/AVFoundation.h>
 #import <GLKit/GLKit.h>
 #import <ImageIO/ImageIO.h>
+#import <Photos/Photos.h>
 #import "CameraPreview.h"
 
 #define TMP_IMAGE_PREFIX @"cpcp_capture_"
+
+static NSString * const CPCameraPreviewErrorPermissionDeniedFirstTime = @"PERMISSION_DENIED_FIRST_TIME";
+static NSString * const CPCameraPreviewErrorPermissionDeniedNeedSettings = @"PERMISSION_DENIED_NEED_SETTINGS";
+static NSString * const CPCameraPreviewErrorPermissionRestricted = @"PERMISSION_RESTRICTED";
 
 typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
   CPCameraGridStyleNone = 0,
@@ -871,6 +876,40 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
   }];
 }
 
+- (void) openAppSettings:(CDVInvokedUrlCommand*)command {
+  NSURL *settingsURL = [NSURL URLWithString:UIApplicationOpenSettingsURLString];
+  if (settingsURL == nil) {
+    CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Unable to open app settings"];
+    [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+    return;
+  }
+
+  UIApplication *application = [UIApplication sharedApplication];
+  if (![application canOpenURL:settingsURL]) {
+    CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Unable to open app settings"];
+    [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+    return;
+  }
+
+  if (@available(iOS 10.0, *)) {
+    [application openURL:settingsURL options:@{} completionHandler:^(BOOL success) {
+      CDVPluginResult *pluginResult = success
+        ? [CDVPluginResult resultWithStatus:CDVCommandStatus_OK]
+        : [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Unable to open app settings"];
+      [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+    }];
+  } else {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    BOOL success = [application openURL:settingsURL];
+#pragma clang diagnostic pop
+    CDVPluginResult *pluginResult = success
+      ? [CDVPluginResult resultWithStatus:CDVCommandStatus_OK]
+      : [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Unable to open app settings"];
+    [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+  }
+}
+
 - (void) switchCamera:(CDVInvokedUrlCommand*)command {
   NSLog(@"switchCamera");
   CDVPluginResult *pluginResult;
@@ -1255,6 +1294,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
     CGFloat quality = (CGFloat)[command.arguments[2] floatValue] / 100.0f;
     BOOL includeThumb = command.arguments.count > 3 ? [command.arguments[3] boolValue] : NO;
     CGFloat thumbWidth = 200.0f;
+    BOOL saveToLibrary = command.arguments.count > 5 ? [command.arguments[5] boolValue] : NO;
     if (command.arguments.count > 4) {
       thumbWidth = (CGFloat)[command.arguments[4] floatValue];
       if (thumbWidth <= 0.0f) {
@@ -1267,6 +1307,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
                 withQuality:quality
                includeThumb:includeThumb
                  thumbWidth:thumbWidth
+              saveToLibrary:saveToLibrary
                  callbackId:command.callbackId];
   } else {
     pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Camera not started"];
@@ -1678,6 +1719,113 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
   return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArray:params];
 }
 
+- (NSError *)librarySaveErrorWithDescription:(NSString *)description {
+  NSDictionary *userInfo = @{NSLocalizedDescriptionKey: (description ?: @"Failed to save image to photo library")};
+  return [NSError errorWithDomain:@"CameraPreview" code:1 userInfo:userInfo];
+}
+
+- (NSError *)photoLibraryPermissionErrorWithCode:(NSString *)code message:(NSString *)message {
+  NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
+  userInfo[NSLocalizedDescriptionKey] = (message ?: @"Photo library permission denied");
+  if (code != nil) {
+    userInfo[@"code"] = code;
+  }
+  return [NSError errorWithDomain:@"CameraPreview.Permission" code:1 userInfo:userInfo];
+}
+
+- (CDVPluginResult *)pluginResultForLibrarySaveError:(NSError *)error {
+  if (error == nil) {
+    return [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Failed to save image to photo library"];
+  }
+
+  NSString *code = error.userInfo[@"code"];
+  NSString *message = error.localizedDescription ?: @"Failed to save image to photo library";
+  if (code == nil || code.length == 0) {
+    return [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:message];
+  }
+
+  NSDictionary *payload = @{ @"code": code, @"message": message };
+  return [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsDictionary:payload];
+}
+
+- (void)saveImageAtPathToPhotoLibrary:(NSString *)filePath completion:(void (^)(NSError *error))completion {
+  if (filePath == nil || filePath.length == 0) {
+    if (completion != nil) {
+      completion([self librarySaveErrorWithDescription:@"Invalid image path for photo library save"]);
+    }
+    return;
+  }
+
+  NSURL *fileURL = [NSURL fileURLWithPath:filePath];
+  void (^performSave)(void) = ^{
+    [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
+      [PHAssetChangeRequest creationRequestForAssetFromImageAtFileURL:fileURL];
+    } completionHandler:^(BOOL success, NSError * _Nullable error) {
+      if (completion != nil) {
+        completion(success ? nil : (error ?: [self librarySaveErrorWithDescription:@"Failed to save image to photo library"]));
+      }
+    }];
+  };
+
+  PHAuthorizationStatus status;
+  if (@available(iOS 14, *)) {
+    status = [PHPhotoLibrary authorizationStatusForAccessLevel:PHAccessLevelAddOnly];
+  } else {
+    status = [PHPhotoLibrary authorizationStatus];
+  }
+
+  if (status == PHAuthorizationStatusAuthorized || status == PHAuthorizationStatusLimited) {
+    performSave();
+    return;
+  }
+
+  if (status == PHAuthorizationStatusNotDetermined) {
+    if (@available(iOS 14, *)) {
+      [PHPhotoLibrary requestAuthorizationForAccessLevel:PHAccessLevelAddOnly handler:^(PHAuthorizationStatus authStatus) {
+        if (authStatus == PHAuthorizationStatusAuthorized || authStatus == PHAuthorizationStatusLimited) {
+          performSave();
+        } else if (authStatus == PHAuthorizationStatusRestricted) {
+          if (completion != nil) {
+            completion([self photoLibraryPermissionErrorWithCode:CPCameraPreviewErrorPermissionRestricted
+                                                         message:@"Photo library permission restricted"]);
+          }
+        } else if (completion != nil) {
+          completion([self photoLibraryPermissionErrorWithCode:CPCameraPreviewErrorPermissionDeniedFirstTime
+                                                       message:@"Photo library permission denied"]);
+        }
+      }];
+    } else {
+      [PHPhotoLibrary requestAuthorization:^(PHAuthorizationStatus authStatus) {
+        if (authStatus == PHAuthorizationStatusAuthorized) {
+          performSave();
+        } else if (authStatus == PHAuthorizationStatusRestricted) {
+          if (completion != nil) {
+            completion([self photoLibraryPermissionErrorWithCode:CPCameraPreviewErrorPermissionRestricted
+                                                         message:@"Photo library permission restricted"]);
+          }
+        } else if (completion != nil) {
+          completion([self photoLibraryPermissionErrorWithCode:CPCameraPreviewErrorPermissionDeniedFirstTime
+                                                       message:@"Photo library permission denied"]);
+        }
+      }];
+    }
+    return;
+  }
+
+  if (status == PHAuthorizationStatusRestricted) {
+    if (completion != nil) {
+      completion([self photoLibraryPermissionErrorWithCode:CPCameraPreviewErrorPermissionRestricted
+                                                   message:@"Photo library permission restricted"]);
+    }
+    return;
+  }
+
+  if (completion != nil) {
+    completion([self photoLibraryPermissionErrorWithCode:CPCameraPreviewErrorPermissionDeniedNeedSettings
+                                                 message:@"Permission denied. Please enable photo library access in Settings"]);
+  }
+}
+
 - (CGFloat)normalizedThumbWidth:(CGFloat)thumbWidth {
   return thumbWidth > 0.0f ? thumbWidth : 200.0f;
 }
@@ -1794,11 +1942,11 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
 }
 
 - (void) invokeTakePicture {
-  [self invokeTakePicture:0.0 withHeight:0.0 withQuality:0.85 includeThumb:NO thumbWidth:200.0 callbackId:self.onPictureTakenHandlerId];
+  [self invokeTakePicture:0.0 withHeight:0.0 withQuality:0.85 includeThumb:NO thumbWidth:200.0 saveToLibrary:NO callbackId:self.onPictureTakenHandlerId];
 }
 
 - (void) invokeTakePicture:(CGFloat) width withHeight:(CGFloat) height withQuality:(CGFloat) quality {
-  [self invokeTakePicture:width withHeight:height withQuality:quality includeThumb:NO thumbWidth:200.0 callbackId:self.onPictureTakenHandlerId];
+  [self invokeTakePicture:width withHeight:height withQuality:quality includeThumb:NO thumbWidth:200.0 saveToLibrary:NO callbackId:self.onPictureTakenHandlerId];
 }
 
 - (void) invokeTakePicture:(CGFloat) width
@@ -1806,6 +1954,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
                withQuality:(CGFloat) quality
               includeThumb:(BOOL)includeThumb
                 thumbWidth:(CGFloat)thumbWidth
+             saveToLibrary:(BOOL)saveToLibrary
                 callbackId:(NSString *)callbackId {
   if (self.captureTimerSeconds <= 0.0) {
     [self capturePictureNow:width
@@ -1813,6 +1962,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
                 withQuality:quality
                includeThumb:includeThumb
                  thumbWidth:thumbWidth
+              saveToLibrary:saveToLibrary
                  callbackId:callbackId];
     return;
   }
@@ -1832,6 +1982,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
                       withQuality:quality
                      includeThumb:includeThumb
                        thumbWidth:thumbWidth
+                   saveToLibrary:saveToLibrary
                        callbackId:callbackId];
   });
 }
@@ -1846,6 +1997,7 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
                withQuality:(CGFloat) quality
               includeThumb:(BOOL)includeThumb
                 thumbWidth:(CGFloat)thumbWidth
+            saveToLibrary:(BOOL)saveToLibrary
                 callbackId:(NSString *)callbackId {
     if (callbackId == nil || callbackId.length == 0) {
       NSLog(@"[CameraPreview][capturePictureNow] ERROR: callbackId is nil/empty, abort capture");
@@ -1936,6 +2088,17 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
             } else {
               pluginResult = [self pluginResultForImageValue:filePath thumbnailValue:thumbPath isFile:YES];
             }
+          }
+
+          if (writeOK && saveToLibrary) {
+            [self saveImageAtPathToPhotoLibrary:filePath completion:^(NSError *libraryError) {
+              CDVPluginResult *finalResult = pluginResult;
+              if (libraryError != nil) {
+                finalResult = [self pluginResultForLibrarySaveError:libraryError];
+              }
+              [self sendPicturePluginResult:finalResult callbackId:callbackId keepCallback:keepCallback];
+            }];
+            return;
           }
 
           [self sendPicturePluginResult:pluginResult callbackId:callbackId keepCallback:keepCallback];
@@ -2034,6 +2197,17 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
             } else {
               pluginResult = [self pluginResultForImageValue:filePath thumbnailValue:thumbPath isFile:YES];
             }
+          }
+
+          if (writeOK && saveToLibrary) {
+            [self saveImageAtPathToPhotoLibrary:filePath completion:^(NSError *libraryError) {
+              CDVPluginResult *finalResult = pluginResult;
+              if (libraryError != nil) {
+                finalResult = [self pluginResultForLibrarySaveError:libraryError];
+              }
+              [self sendPicturePluginResult:finalResult callbackId:callbackId keepCallback:keepCallback];
+            }];
+            return;
           }
         } else {
           NSString *base64Image = [self getBase64Image:resultFinalImage withQuality:quality];

@@ -4,12 +4,15 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
 import android.content.ContextWrapper;
+import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.app.FragmentManager;
 import android.app.FragmentTransaction;
 import android.hardware.Camera;
 import android.os.Build;
 import android.os.Handler;
+import android.provider.Settings;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
@@ -23,6 +26,7 @@ import android.view.ViewGroup;
 import android.view.ViewParent;
 import android.widget.FrameLayout;
 import android.graphics.Color;
+import androidx.core.app.ActivityCompat;
 
 import org.apache.cordova.CallbackContext;
 import org.apache.cordova.CordovaPlugin;
@@ -52,6 +56,7 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
   private static final String START_CAMERA_ACTION = "startCamera";
   private static final String HAS_PERMISSION_ACTION = "hasPermission";
   private static final String REQUEST_PERMISSION_ACTION = "requestPermission";
+  private static final String OPEN_APP_SETTINGS_ACTION = "openAppSettings";
   private static final String STOP_CAMERA_ACTION = "stopCamera";
   private static final String PREVIEW_SIZE_ACTION = "setPreviewSize";
   private static final String SET_PREVIEW_BACKGROUND_COLOR_ACTION = "setPreviewBackgroundColor";
@@ -87,6 +92,10 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
   private static final int CAM_REQ_CODE = 0;
   private static final int VID_REQ_CODE = 1;
   private static final int PERMISSION_REQ_CODE = 2;
+  private static final int WRITE_LIBRARY_PERMISSION_REQ_CODE = 3;
+
+  private static final String ERROR_PERMISSION_DENIED_FIRST_TIME = "PERMISSION_DENIED_FIRST_TIME";
+  private static final String ERROR_PERMISSION_DENIED_NEED_SETTINGS = "PERMISSION_DENIED_NEED_SETTINGS";
   private String VIDEO_FILE_PATH = "";
   private static final String VIDEO_FILE_EXTENSION = ".mp4";
 
@@ -106,6 +115,34 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
 
   private CallbackContext execCallback;
   private JSONArray execArgs;
+
+  private PendingTakePictureRequest pendingTakePictureRequest;
+
+  private static class PendingTakePictureRequest {
+    final int width;
+    final int height;
+    final int quality;
+    final boolean includeThumb;
+    final int thumbWidth;
+    final boolean saveToLibrary;
+    final CallbackContext callbackContext;
+
+    PendingTakePictureRequest(int width,
+                              int height,
+                              int quality,
+                              boolean includeThumb,
+                              int thumbWidth,
+                              boolean saveToLibrary,
+                              CallbackContext callbackContext) {
+      this.width = width;
+      this.height = height;
+      this.quality = quality;
+      this.includeThumb = includeThumb;
+      this.thumbWidth = thumbWidth;
+      this.saveToLibrary = saveToLibrary;
+      this.callbackContext = callbackContext;
+    }
+  }
 
   private ViewParent webViewParent;
 
@@ -135,6 +172,8 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
       return hasPermission(callbackContext);
     } else if (REQUEST_PERMISSION_ACTION.equals(action)) {
       return requestPermission(callbackContext);
+    } else if (OPEN_APP_SETTINGS_ACTION.equals(action)) {
+      return openAppSettings(callbackContext);
     } else if (START_CAMERA_ACTION.equals(action)) {
       if (cordova.hasPermission(permissions[0])) {
         return startCamera(args.getInt(0), args.getInt(1), args.getInt(2), args.getInt(3), args.getString(4), args.getBoolean(5), args.getBoolean(6), args.getBoolean(7), args.getString(8), args.getString(9), args.getBoolean(10), args.getBoolean(11), args.getBoolean(12), args.length() > 13 && args.getBoolean(13), callbackContext);
@@ -147,10 +186,31 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
     } else if (TAKE_PICTURE_ACTION.equals(action)) {
       boolean includeThumb = args.length() > 3 && args.optBoolean(3, false);
       int thumbWidth = args.length() > 4 ? args.optInt(4, 200) : 200;
+      boolean saveToLibrary = args.length() > 5 && args.optBoolean(5, false);
       if (thumbWidth <= 0) {
         thumbWidth = 200;
       }
-      return takePicture(args.getInt(0), args.getInt(1), args.getInt(2), includeThumb, thumbWidth, callbackContext);
+
+      if (saveToLibrary && needsLegacyWriteLibraryPermission() && !hasWriteLibraryPermission()) {
+        if (pendingTakePictureRequest != null) {
+          callbackContext.error("Photo library permission request already in progress");
+          return true;
+        }
+
+        pendingTakePictureRequest = new PendingTakePictureRequest(
+          args.getInt(0),
+          args.getInt(1),
+          args.getInt(2),
+          includeThumb,
+          thumbWidth,
+          true,
+          callbackContext
+        );
+        requestWriteLibraryPermission();
+        return true;
+      }
+
+      return takePicture(args.getInt(0), args.getInt(1), args.getInt(2), includeThumb, thumbWidth, saveToLibrary, callbackContext);
     } else if (TAKE_SNAPSHOT_ACTION.equals(action)) {
       return takeSnapshot(args.getInt(0), callbackContext);
     }else if (START_RECORD_VIDEO_ACTION.equals(action)) {
@@ -246,6 +306,39 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
 
   @Override
   public void onRequestPermissionResult(int requestCode, String[] permissions, int[] grantResults) throws JSONException {
+    if (requestCode == WRITE_LIBRARY_PERMISSION_REQ_CODE) {
+      boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+      PendingTakePictureRequest pending = pendingTakePictureRequest;
+      pendingTakePictureRequest = null;
+
+      if (pending == null) {
+        return;
+      }
+
+      if (granted) {
+        takePicture(
+          pending.width,
+          pending.height,
+          pending.quality,
+          pending.includeThumb,
+          pending.thumbWidth,
+          pending.saveToLibrary,
+          pending.callbackContext
+        );
+      } else {
+        if (shouldPromptToOpenSettingsForWrite()) {
+          sendPermissionError(pending.callbackContext,
+            ERROR_PERMISSION_DENIED_NEED_SETTINGS,
+            "Permission denied. Please enable Photos and videos access in app settings.");
+        } else {
+          sendPermissionError(pending.callbackContext,
+            ERROR_PERMISSION_DENIED_FIRST_TIME,
+            "Permission denied");
+        }
+      }
+      return;
+    }
+
     for(int r:grantResults){
       if(r == PackageManager.PERMISSION_DENIED){
         if (requestCode == PERMISSION_REQ_CODE) {
@@ -280,6 +373,47 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
     return true;
   }
 
+  private boolean needsLegacyWriteLibraryPermission() {
+    return Build.VERSION.SDK_INT < Build.VERSION_CODES.Q;
+  }
+
+  private boolean hasWriteLibraryPermission() {
+    if (!needsLegacyWriteLibraryPermission()) {
+      return true;
+    }
+
+    Activity activity = cordova.getActivity();
+    if (activity == null) {
+      return false;
+    }
+
+    return PackageManager.PERMISSION_GRANTED == ActivityCompat.checkSelfPermission(activity, Manifest.permission.WRITE_EXTERNAL_STORAGE);
+  }
+
+  private void requestWriteLibraryPermission() {
+    cordova.requestPermissions(this, WRITE_LIBRARY_PERMISSION_REQ_CODE, new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE});
+  }
+
+  private boolean shouldPromptToOpenSettingsForWrite() {
+    Activity activity = cordova.getActivity();
+    if (activity == null) {
+      return false;
+    }
+
+    return !ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.WRITE_EXTERNAL_STORAGE);
+  }
+
+  private void sendPermissionError(CallbackContext callbackContext, String code, String message) {
+    JSONObject payload = new JSONObject();
+    try {
+      payload.put("code", code);
+      payload.put("message", message);
+      callbackContext.sendPluginResult(new PluginResult(PluginResult.Status.ERROR, payload));
+    } catch (JSONException e) {
+      callbackContext.error(code);
+    }
+  }
+
   private boolean requestPermission(CallbackContext callbackContext) {
     if (cordova.hasPermission(permissions[0])) {
       callbackContext.success();
@@ -293,6 +427,27 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
 
     permissionCallbackContext = callbackContext;
     cordova.requestPermissions(this, PERMISSION_REQ_CODE, permissions);
+    return true;
+  }
+
+  private boolean openAppSettings(CallbackContext callbackContext) {
+    Activity activity = cordova.getActivity();
+    if (activity == null) {
+      callbackContext.error("Unable to open app settings");
+      return true;
+    }
+
+    try {
+      Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+      Uri uri = Uri.fromParts("package", activity.getPackageName(), null);
+      intent.setData(uri);
+      intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+      activity.startActivity(intent);
+      callbackContext.success();
+    } catch (Exception e) {
+      Log.e(TAG, "openAppSettings failed", e);
+      callbackContext.error("Unable to open app settings");
+    }
     return true;
   }
 
@@ -607,16 +762,16 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
   }
 
   private boolean takePicture(int width, int height, int quality, CallbackContext callbackContext) {
-    return takePicture(width, height, quality, false, 200, callbackContext);
+    return takePicture(width, height, quality, false, 200, false, callbackContext);
   }
 
-  private boolean takePicture(int width, int height, int quality, boolean includeThumb, int thumbWidth, CallbackContext callbackContext) {
+  private boolean takePicture(int width, int height, int quality, boolean includeThumb, int thumbWidth, boolean saveToLibrary, CallbackContext callbackContext) {
     if(this.hasView(callbackContext) == false){
       return true;
     }
     takePictureCallbackContext = callbackContext;
 
-    fragment.takePicture(width, height, quality, includeThumb, thumbWidth);
+    fragment.takePicture(width, height, quality, includeThumb, thumbWidth, saveToLibrary);
 
     return true;
   }
