@@ -25,8 +25,12 @@ import android.hardware.Camera.ShutterCallback;
 import android.media.CamcorderProfile;
 import android.media.MediaRecorder;
 import android.os.Bundle;
+import android.os.Build;
 import android.os.Handler;
 import android.provider.MediaStore;
+import android.content.ContentValues;
+import android.net.Uri;
+import android.os.Environment;
 import android.util.Log;
 import android.util.TypedValue;
 import android.util.DisplayMetrics;
@@ -58,6 +62,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.lang.Exception;
 import java.lang.Integer;
 import java.text.SimpleDateFormat;
@@ -1312,24 +1317,66 @@ public class CameraActivity extends Fragment {
     try {
       Activity activity = getActivity();
       if (activity == null) {
-        return "Activity unavailable while saving to photo library";
+        return null;
       }
 
       Bitmap bitmap = BitmapFactory.decodeFile(sourcePath);
       if (bitmap == null) {
-        return "Failed to decode stored image for library save";
+        return null;
       }
 
-      String name = "cpcp_" + System.currentTimeMillis();
-      String uri = MediaStore.Images.Media.insertImage(activity.getContentResolver(), bitmap, name, "Captured by camera preview");
-      bitmap.recycle();
-      if (uri == null || uri.length() == 0) {
-        return "Failed to save image to photo library";
+      String name = "cpcp_" + System.currentTimeMillis() + ".jpg";
+      ContentValues values = new ContentValues();
+
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        values.put(MediaStore.Images.Media.DISPLAY_NAME, name);
+        values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+        values.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/CameraPreview");
+        values.put(MediaStore.Images.Media.IS_PENDING, 1);
+      } else {
+        File directory = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "CameraPreview");
+        if (!directory.exists() && !directory.mkdirs()) {
+          bitmap.recycle();
+          return null;
+        }
+
+        values.put(MediaStore.Images.Media.DISPLAY_NAME, name);
+        values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+        values.put(MediaStore.Images.Media.DATA, new File(directory, name).getAbsolutePath());
       }
 
-      return null;
+      Uri uri = activity.getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+      if (uri == null) {
+        bitmap.recycle();
+        return null;
+      }
+
+      OutputStream outputStream = null;
+      try {
+        outputStream = activity.getContentResolver().openOutputStream(uri);
+        if (outputStream == null || !bitmap.compress(Bitmap.CompressFormat.JPEG, 100, outputStream)) {
+          activity.getContentResolver().delete(uri, null, null);
+          return null;
+        }
+
+        outputStream.flush();
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+          values.clear();
+          values.put(MediaStore.Images.Media.IS_PENDING, 0);
+          activity.getContentResolver().update(uri, values, null, null);
+        }
+
+        return uri.toString();
+      } finally {
+        if (outputStream != null) {
+          outputStream.close();
+        }
+        bitmap.recycle();
+      }
     } catch (Exception e) {
-      return e.getMessage() != null ? e.getMessage() : "Failed to save image to photo library";
+      Log.d(TAG, "Failed to save image to photo library", e);
+      return null;
     }
   }
 
@@ -1395,11 +1442,12 @@ public class CameraActivity extends Fragment {
           out.write(data);
           out.close();
 
+          String libraryUri = null;
           if (currentSaveToLibrary) {
-            String saveErr = saveImageFileToLibrary(path);
-            if (saveErr != null) {
+            libraryUri = saveImageFileToLibrary(path);
+            if (libraryUri == null) {
               if (eventListener != null) {
-                eventListener.onPictureTakenError(saveErr);
+                eventListener.onPictureTakenError("Failed to save image to photo library");
               }
               return;
             }
@@ -1420,7 +1468,7 @@ public class CameraActivity extends Fragment {
             thumbOut.close();
 
             if (eventListener != null) {
-              eventListener.onPictureTaken(path, thumbPath, true);
+              eventListener.onPictureTaken(currentSaveToLibrary ? libraryUri : path, thumbPath, true);
             } else {
               Log.e(TAG, "eventListener is null");
             }
@@ -1428,7 +1476,7 @@ public class CameraActivity extends Fragment {
           }
 
           if (eventListener != null) {
-            eventListener.onPictureTaken(path, null, true);
+            eventListener.onPictureTaken(currentSaveToLibrary ? libraryUri : path, null, true);
           } else {
             Log.e(TAG, "eventListener is null");
           }
