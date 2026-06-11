@@ -194,13 +194,15 @@ CameraPreview.hasPermission(function(hasPermission) {
 
 <info>This requests camera permission only. Photo library permission is only needed when `storeToFile = true` and `saveToLibrary = true` in `takePicture`.</info><br/>
 
-<info>When permission is already granted, success callback is called immediately. If permission is denied or restricted, error callback is called.</info><br/>
+<info>When permission is already granted, success callback is called immediately. If permission is denied or restricted, error callback is called with an error object containing `code` and `message` properties.</info><br/>
+
+<info>Error codes: `PERMISSION_DENIED_FIRST_TIME` (permission can still be re-requested in-app), `PERMISSION_DENIED_NEED_SETTINGS` (user should be guided to app settings).</info><br/>
 
 ```javascript
 CameraPreview.requestPermission(function() {
   console.log('camera permission granted');
 }, function(err) {
-  console.error('requestPermission failed:', err);
+  console.error('requestPermission failed:', err.code, err.message);
 });
 ```
 

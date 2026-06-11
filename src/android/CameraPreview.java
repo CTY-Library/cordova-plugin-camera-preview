@@ -326,7 +326,8 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
           pending.callbackContext
         );
       } else {
-        if (shouldPromptToOpenSettingsForWrite()) {
+        boolean hasGrantResult = grantResults != null && grantResults.length > 0;
+        if (!hasGrantResult || shouldPromptToOpenSettingsForWrite()) {
           sendPermissionError(pending.callbackContext,
             ERROR_PERMISSION_DENIED_NEED_SETTINGS,
             "Permission denied. Please enable Photos and videos access in app settings.");
@@ -343,8 +344,19 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
       if(r == PackageManager.PERMISSION_DENIED){
         if (requestCode == PERMISSION_REQ_CODE) {
           if (permissionCallbackContext != null) {
-            permissionCallbackContext.error("Camera permission denied");
+            sendPermissionError(permissionCallbackContext,
+              ERROR_PERMISSION_DENIED_NEED_SETTINGS,
+              "Camera permission denied. Please open app settings and enable the required permissions.");
             permissionCallbackContext = null;
+          }
+          return;
+        }
+
+        if (requestCode == CAM_REQ_CODE || requestCode == VID_REQ_CODE) {
+          if (execCallback != null) {
+            sendPermissionError(execCallback,
+              ERROR_PERMISSION_DENIED_NEED_SETTINGS,
+              "Camera permission denied. Please open app settings and enable the required permissions.");
           }
           return;
         }
