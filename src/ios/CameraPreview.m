@@ -849,15 +849,21 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
   }
 
   if (status == AVAuthorizationStatusDenied) {
-    NSString *message = @"Access has been denied. Change your setting > this app > Camera enable";
-    CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:message];
+    NSDictionary *payload = @{
+      @"code": CPCameraPreviewErrorPermissionDeniedNeedSettings,
+      @"message": @"Camera permission denied. Please open Settings > Camera to enable access."
+    };
+    CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsDictionary:payload];
     [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
     return;
   }
 
   if (status == AVAuthorizationStatusRestricted) {
-    NSString *message = @"Access has been restricted. Change your setting > Privacy > Camera enable";
-    CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:message];
+    NSDictionary *payload = @{
+      @"code": CPCameraPreviewErrorPermissionRestricted,
+      @"message": @"Camera permission restricted. Please check iOS restrictions in Settings > Screen Time > Content & Privacy Restrictions."
+    };
+    CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsDictionary:payload];
     [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
     return;
   }
@@ -868,8 +874,11 @@ typedef NS_ENUM(NSInteger, CPCameraGridStyle) {
         CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
         [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
       } else {
-        NSString *message = @"Camera permission not granted";
-        CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:message];
+        NSDictionary *payload = @{
+          @"code": CPCameraPreviewErrorPermissionDeniedFirstTime,
+          @"message": @"Camera permission denied. Please enable camera access in app settings."
+        };
+        CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsDictionary:payload];
         [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
       }
     });
