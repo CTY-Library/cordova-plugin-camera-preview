@@ -307,7 +307,8 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
   @Override
   public void onRequestPermissionResult(int requestCode, String[] permissions, int[] grantResults) throws JSONException {
     if (requestCode == WRITE_LIBRARY_PERMISSION_REQ_CODE) {
-      boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+      boolean hasGrantResult = grantResults != null && grantResults.length > 0;
+      boolean granted = hasGrantResult && grantResults[0] == PackageManager.PERMISSION_GRANTED;
       PendingTakePictureRequest pending = pendingTakePictureRequest;
       pendingTakePictureRequest = null;
 
@@ -326,7 +327,6 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
           pending.callbackContext
         );
       } else {
-        boolean hasGrantResult = grantResults != null && grantResults.length > 0;
         if (!hasGrantResult || shouldPromptToOpenSettingsForWrite()) {
           sendPermissionError(pending.callbackContext,
             ERROR_PERMISSION_DENIED_NEED_SETTINGS,
@@ -340,13 +340,38 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
       return;
     }
 
+    boolean hasGrantResult = grantResults != null && grantResults.length > 0;
+    if (!hasGrantResult) {
+      if (requestCode == PERMISSION_REQ_CODE) {
+        if (permissionCallbackContext != null) {
+          sendPermissionError(permissionCallbackContext,
+            ERROR_PERMISSION_DENIED_FIRST_TIME,
+            "Camera permission request dismissed.");
+          permissionCallbackContext = null;
+        }
+      } else if (requestCode == CAM_REQ_CODE || requestCode == VID_REQ_CODE) {
+        if (execCallback != null) {
+          sendPermissionError(execCallback,
+            ERROR_PERMISSION_DENIED_FIRST_TIME,
+            "Camera permission request dismissed.");
+        }
+      }
+      return;
+    }
+
     for(int r:grantResults){
       if(r == PackageManager.PERMISSION_DENIED){
         if (requestCode == PERMISSION_REQ_CODE) {
           if (permissionCallbackContext != null) {
+            String code = shouldPromptToOpenSettings(permissions)
+              ? ERROR_PERMISSION_DENIED_NEED_SETTINGS
+              : ERROR_PERMISSION_DENIED_FIRST_TIME;
+            String message = ERROR_PERMISSION_DENIED_NEED_SETTINGS.equals(code)
+              ? "Camera permission denied. Please open app settings and enable the required permissions."
+              : "Camera permission denied.";
             sendPermissionError(permissionCallbackContext,
-              ERROR_PERMISSION_DENIED_NEED_SETTINGS,
-              "Camera permission denied. Please open app settings and enable the required permissions.");
+              code,
+              message);
             permissionCallbackContext = null;
           }
           return;
@@ -354,9 +379,15 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
 
         if (requestCode == CAM_REQ_CODE || requestCode == VID_REQ_CODE) {
           if (execCallback != null) {
+            String code = shouldPromptToOpenSettings(permissions)
+              ? ERROR_PERMISSION_DENIED_NEED_SETTINGS
+              : ERROR_PERMISSION_DENIED_FIRST_TIME;
+            String message = ERROR_PERMISSION_DENIED_NEED_SETTINGS.equals(code)
+              ? "Camera permission denied. Please open app settings and enable the required permissions."
+              : "Camera permission denied.";
             sendPermissionError(execCallback,
-              ERROR_PERMISSION_DENIED_NEED_SETTINGS,
-              "Camera permission denied. Please open app settings and enable the required permissions.");
+              code,
+              message);
           }
           return;
         }
@@ -378,6 +409,22 @@ public class CameraPreview extends CordovaPlugin implements CameraActivity.Camer
         permissionCallbackContext = null;
       }
     }
+  }
+
+  private boolean shouldPromptToOpenSettings(String[] requestedPermissions) {
+    Activity activity = cordova.getActivity();
+    if (activity == null || requestedPermissions == null || requestedPermissions.length == 0) {
+      return false;
+    }
+
+    for (String permission : requestedPermissions) {
+      if (ActivityCompat.checkSelfPermission(activity, permission) != PackageManager.PERMISSION_GRANTED
+        && !ActivityCompat.shouldShowRequestPermissionRationale(activity, permission)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private boolean hasPermission(CallbackContext callbackContext) {
